@@ -197,7 +197,9 @@ display_size_histogram(adc_size_info, key="adc")
 # Plot the distribution in the intensity for the T2-weighted image for the first patient
 patient0_t2_file = patients[0]["t2"]
 t2_patient0 = sitk.GetArrayViewFromImage(sitk.ReadImage(patient0_t2_file))
+
 plt.hist(t2_patient0.flatten())
+plt.title("T2 Intensity Distribution For Patient 0000")
 plt.show()
 
 input("Press any key to continue...")
@@ -206,6 +208,7 @@ input("Press any key to continue...")
 patient0_bval_file = patients[0]["bval"]
 bval_patient0 = sitk.GetArrayViewFromImage(sitk.ReadImage(patient0_bval_file))
 plt.hist(bval_patient0.flatten())
+plt.title("BVAL Intensity Distribution For Patient 0000")
 plt.show()
 
 input("Press any key to continue...")
@@ -214,4 +217,13 @@ input("Press any key to continue...")
 patient0_adc_file = patients[0]["adc"]
 adc_patient0 = sitk.GetArrayViewFromImage(sitk.ReadImage(patient0_adc_file))
 plt.hist(adc_patient0.flatten())
+plt.title("ADC Intensity Distribution For Patient 0000")
+plt.show()
+
+# Attempt to open mhd file
+ktrans_006 = r"/home/andrewg/PycharmProjects/assignment1/KTrans/ProstateXKtrains-train-fixed/ProstateX-0006/" + \
+r"ProstateX-0006-Ktrans.mhd"
+ktrans_image = sitk.ReadImage(ktrans_006)
+ktrans_image = sitk.GetArrayViewFromImage(ktrans_image)
+plt.imshow(ktrans_image[10])
 plt.show()

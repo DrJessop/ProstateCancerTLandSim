@@ -1,10 +1,8 @@
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.signal as signal
 from A1 import create_patients
 import os
-import pprint as pp
 
 
 t2_patient_006 = sitk.ReadImage(r"/home/andrewg/PycharmProjects/assignments/data/PROSTATEx/" +
@@ -62,6 +60,14 @@ plt.show()
 
 
 def resample_image(itk_image, out_spacing=(1.0, 1.0, 1.0), is_label=False):
+    """
+    Retrieved this function from:
+    https://www.programcreek.com/python/example/96383/SimpleITK.sitkNearestNeighbor
+    :param itk_image: The image that we would like to resample
+    :param out_spacing: The new spacing of the voxels we would like
+    :param is_label: If True, use kNearestNeighbour interpolation, else use BSpline
+    :return: The resampled image
+    """
     original_spacing = itk_image.GetSpacing()
     original_size = itk_image.GetSize()
 
@@ -85,18 +91,65 @@ def resample_image(itk_image, out_spacing=(1.0, 1.0, 1.0), is_label=False):
     return resample.Execute(itk_image)
 
 
-patients = create_patients()
-t2 = [sitk.ReadImage(patients[patient_number]["t2"]) for patient_number in range(len(patients))]
-adc = [sitk.ReadImage(patients[patient_number]["adc"]) for patient_number in range(len(patients))]
-bval = [sitk.ReadImage(patients[patient_number]["bval"]) if patients[patient_number]["bval"] != ""
-        else "" for patient_number in range(len(patients))]
+def resample_all_images(modality, out_spacing, some_missing=False):
+    """
+    This function returns a list of re-sampled images for a given modality and desired spacing
+    :param modality: ex. t2, adc, bval, etc.
+    :param out_spacing: The desired spacing of the images
+    :param some_missing: If an image may be missing, this may be set to True to handle the case
+    of a missing image
+    :return: Re-sampled images
+    """
+    if some_missing:
+        return [resample_image(image, out_spacing) if image != "" else ""
+                for image in modality]
+    return [resample_image(image, out_spacing) if image != "" else "" for image in modality]
 
-# Resampling all the images
-t2 = [resample_image(t2_image, out_spacing=(0.56, 0.56, 3.6)) for t2_image in t2]
-print("Finished resampling t2...")
-adc = [resample_image(adc_image, out_spacing=(2.0, 2.0, 3.0)) for adc_image in adc]
-print("Finished resampling adc...")
-bval = [resample_image(bval_image, out_spacing=(2.0, 2.0, 3.0))
-        if bval_image != "" else "" for bval_image in bval]
-print("Finished resampling bval...")
+
+if __name__ == "__main__":
+    patients = create_patients()
+    t2 = [sitk.ReadImage(patients[patient_number]["t2"]) for patient_number in range(len(patients))]
+    adc = [sitk.ReadImage(patients[patient_number]["adc"]) for patient_number in range(len(patients))]
+    bval = [sitk.ReadImage(patients[patient_number]["bval"]) if patients[patient_number]["bval"] != ""
+            else "" for patient_number in range(len(patients))]
+
+    # Re-sampling all the images
+    location = r"/home/andrewg/PycharmProjects/assignments/resampled/t2/t2_{}.nrrd"
+    if not(os.listdir(r"/home/andrewg/PycharmProjects/assignments/resampled/t2")):
+        t2[:] = resample_all_images(t2, out_spacing=(0.5, 0.5, 3))
+        for patient_number, image in enumerate(t2):
+            sitk.WriteImage(image, location.format(patient_number))
+    else:
+        t2 = [sitk.ReadImage(location.format(patient_number))
+              for patient_number in range(len(patients))]
+
+    location = r"/home/andrewg/PycharmProjects/assignments/resampled/adc/adc_{}.nrrd"
+    if not(os.listdir(r"/home/andrewg/PycharmProjects/assignments/resampled/adc")):
+        adc[:] = resample_all_images(adc, out_spacing=(2, 2, 3))
+        for patient_number, image in enumerate(adc):
+            sitk.WriteImage(image, location.format(patient_number))
+    else:
+        adc = [sitk.ReadImage(location.format(patient_number))
+               for patient_number in range(len(patients))]
+
+    location = r"/home/andrewg/PycharmProjects/assignments/resampled/bval/bval_{}.nrrd"
+    if not(os.listdir(r"/home/andrewg/PycharmProjects/assignments/resampled/bval")):
+        bval[:] = resample_all_images(bval, out_spacing=(2, 2, 3))
+        for patient_number, image in enumerate(bval):
+            if image != "":
+                sitk.WriteImage(image, location.format(patient_number))
+    else:
+        def read_special_case(patient_number):
+            try:
+                return sitk.ReadImage(location.format(patient_number))
+            except:
+                return ""
+
+        bval = [read_special_case(patient_number)
+                for patient_number in range(len(patients))]
+
+    plt.imshow(sitk.GetArrayFromImage(t2[0])[10])
+    plt.show()
+
+
 

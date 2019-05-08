@@ -10,7 +10,7 @@ def create_nrrd_files():
     This function loops through the XChallenge directory structure and creates an nrrd file for each dicom file subdirectory
     :return:
     '''
-    xchallenge_directory = r"/home/andrewg/PycharmProjects/assignment1/data/PROSTATEx"
+    xchallenge_directory = r"/home/andrewg/PycharmProjects/assignments/data/PROSTATEx"
 
     reader = sitk.ImageSeriesReader()
 
@@ -70,7 +70,7 @@ def create_patients():
     Retrieves the t2, adc, and bval nrrd files for each patient and stores them in a dictionary
     :return: A dictionary of three different modalities for each patient
     """
-    xchallenge_directory = r"/home/andrewg/PycharmProjects/assignment1/data/PROSTATEx"
+    xchallenge_directory = r"/home/andrewg/PycharmProjects/assignments/data/PROSTATEx"
     xchallenge_directory_contents = os.listdir(xchallenge_directory)
     patient_dict = dict()
     for patient_directory in xchallenge_directory_contents:
@@ -84,29 +84,6 @@ def create_patients():
         current_patient["adc"] = adc
         current_patient["bval"] = bval
     return patient_dict
-
-
-patients = create_patients()
-
-t2_spacial_info = [list(sitk.ReadImage(patients[patient_number]["t2"]).GetSpacing())
-                   for patient_number in range(len(patients))]
-
-bval_spacial_info = [list(sitk.ReadImage(patients[patient_number]["bval"]).GetSpacing())
-                     for patient_number in range(len(patients))
-                        if patients[patient_number]["bval"] != ""]
-
-adc_spacial_info = [list(sitk.ReadImage(patients[patient_number]["adc"]).GetSpacing())
-                    for patient_number in range(len(patients))]
-
-t2_size_info = [sitk.ReadImage(patients[patient_number]["t2"]).GetSize()
-                for patient_number in range(len(patients))]
-
-bval_size_info = [sitk.ReadImage(patients[patient_number]["bval"]).GetSize()
-                  for patient_number in range(len(patients))
-                    if patients[patient_number]["bval"] != ""]
-
-adc_size_info = [sitk.ReadImage(patients[patient_number]["adc"]).GetSize()
-                 for patient_number in range(len(patients))]
 
 
 def create_spacing_histogram(spacial_info):
@@ -159,6 +136,7 @@ def display_spatial_histogram(spatial_info, key):
     plt.show()
     input("Press any key to continue...")
 
+
 def display_size_histogram(size_info, key):
     """
     Displays the histogram of image sizes
@@ -176,54 +154,79 @@ def display_size_histogram(size_info, key):
     plt.show()
     input("Press any key to continue...")
 
-# Plot the spatial distribution for the T2-weighted images
-display_spatial_histogram(t2_spacial_info, key="t2")
 
-# Plot the size distribution for the T2-weighted images
-display_size_histogram(t2_size_info, key="t2")
+if __name__ == "__main__":
+    patients = create_patients()
 
-# Plot the spatial distribution for the BVAL images
-display_spatial_histogram(bval_spacial_info, key="bval")
+    t2_spacial_info = [list(sitk.ReadImage(patients[patient_number]["t2"]).GetSpacing())
+                       for patient_number in range(len(patients))]
 
-# Plot the size distribution for the BVAL images
-display_size_histogram(bval_size_info, key="bval")
+    bval_spacial_info = [list(sitk.ReadImage(patients[patient_number]["bval"]).GetSpacing())
+                         for patient_number in range(len(patients))
+                         if patients[patient_number]["bval"] != ""]
 
-# Plot the spatial distribution for the ADC images
-display_spatial_histogram(adc_spacial_info, key="adc")
+    adc_spacial_info = [list(sitk.ReadImage(patients[patient_number]["adc"]).GetSpacing())
+                        for patient_number in range(len(patients))]
 
-# Plot the size distribution for the ADC images
-display_size_histogram(adc_size_info, key="adc")
+    t2_size_info = [sitk.ReadImage(patients[patient_number]["t2"]).GetSize()
+                    for patient_number in range(len(patients))]
 
-# Plot the distribution in the intensity for the T2-weighted image for the first patient
-patient0_t2_file = patients[0]["t2"]
-t2_patient0 = sitk.GetArrayViewFromImage(sitk.ReadImage(patient0_t2_file))
+    bval_size_info = [sitk.ReadImage(patients[patient_number]["bval"]).GetSize()
+                      for patient_number in range(len(patients))
+                      if patients[patient_number]["bval"] != ""]
 
-plt.hist(t2_patient0.flatten())
-plt.title("T2 Intensity Distribution For Patient 0000")
-plt.show()
+    adc_size_info = [sitk.ReadImage(patients[patient_number]["adc"]).GetSize()
+                     for patient_number in range(len(patients))]
 
-input("Press any key to continue...")
+    # Plot the spatial distribution for the T2-weighted images
+    display_spatial_histogram(t2_spacial_info, key="t2")
 
-# Plot the distribution in the intensity for the BVAL image for the first patient
-patient0_bval_file = patients[0]["bval"]
-bval_patient0 = sitk.GetArrayViewFromImage(sitk.ReadImage(patient0_bval_file))
-plt.hist(bval_patient0.flatten())
-plt.title("BVAL Intensity Distribution For Patient 0000")
-plt.show()
+    # Plot the size distribution for the T2-weighted images
+    display_size_histogram(t2_size_info, key="t2")
 
-input("Press any key to continue...")
+    # Plot the spatial distribution for the BVAL images
+    display_spatial_histogram(bval_spacial_info, key="bval")
 
-# Plot the distribution in the intensity for the ADC image for the first patient
-patient0_adc_file = patients[0]["adc"]
-adc_patient0 = sitk.GetArrayViewFromImage(sitk.ReadImage(patient0_adc_file))
-plt.hist(adc_patient0.flatten())
-plt.title("ADC Intensity Distribution For Patient 0000")
-plt.show()
+    # Plot the size distribution for the BVAL images
+    display_size_histogram(bval_size_info, key="bval")
 
-# Attempt to open mhd file
-ktrans_006 = r"/home/andrewg/PycharmProjects/assignment1/KTrans/ProstateXKtrains-train-fixed/ProstateX-0006/" + \
-r"ProstateX-0006-Ktrans.mhd"
-ktrans_image = sitk.ReadImage(ktrans_006)
-ktrans_image = sitk.GetArrayViewFromImage(ktrans_image)
-plt.imshow(ktrans_image[10])
-plt.show()
+    # Plot the spatial distribution for the ADC images
+    display_spatial_histogram(adc_spacial_info, key="adc")
+
+    # Plot the size distribution for the ADC images
+    display_size_histogram(adc_size_info, key="adc")
+
+    # Plot the distribution in the intensity for the T2-weighted image for the first patient
+    patient0_t2_file = patients[0]["t2"]
+    t2_patient0 = sitk.GetArrayViewFromImage(sitk.ReadImage(patient0_t2_file))
+
+    plt.hist(t2_patient0.flatten())
+    plt.title("T2 Intensity Distribution For Patient 0000")
+    plt.show()
+
+    input("Press any key to continue...")
+
+    # Plot the distribution in the intensity for the BVAL image for the first patient
+    patient0_bval_file = patients[0]["bval"]
+    bval_patient0 = sitk.GetArrayViewFromImage(sitk.ReadImage(patient0_bval_file))
+    plt.hist(bval_patient0.flatten())
+    plt.title("BVAL Intensity Distribution For Patient 0000")
+    plt.show()
+
+    input("Press any key to continue...")
+
+    # Plot the distribution in the intensity for the ADC image for the first patient
+    patient0_adc_file = patients[0]["adc"]
+    adc_patient0 = sitk.GetArrayViewFromImage(sitk.ReadImage(patient0_adc_file))
+    plt.hist(adc_patient0.flatten())
+    plt.title("ADC Intensity Distribution For Patient 0000")
+    plt.show()
+
+    # Attempt to open mhd file
+    ktrans_006 = r"/home/andrewg/PycharmProjects/assignments/KTrans/ProstateXKtrains-train-fixed/ProstateX-0006/" + \
+                 r"ProstateX-0006-Ktrans.mhd"
+    ktrans_image = sitk.ReadImage(ktrans_006)
+    ktrans_image = sitk.GetArrayViewFromImage(ktrans_image)
+    plt.imshow(ktrans_image[10])
+    plt.show()
+

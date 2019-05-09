@@ -3,59 +3,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from A1 import create_patients
 import os
+import pandas as pd
 
 
 t2_patient_006 = sitk.ReadImage(r"/home/andrewg/PycharmProjects/assignments/data/PROSTATEx/" +
                                 r"ProstateX-0006/10-21-2011-MR prostaat kanker detectie NDmc MCAPRODETN-79408/" +
                                 r"4-t2tsetra-98209/4-t2tsetra-98209.nrrd")
 
-"""
-# See the 11th (index 10) slice of the t2-weighted image for patient 0006 before equalization
-plt.imshow(sitk.GetArrayFromImage(t2_patient_006)[10])
-plt.show()
-
-input("Press any key to continue...")
-'''
-# Apply histogram equalization to t2 image of patient 0006
-hist_equalize_filter = sitk.AdaptiveHistogramEqualizationImageFilter()
-t2_patient_006 = hist_equalize_filter.Execute(t2_patient_006)
-t2_patient_006_arr = sitk.GetArrayFromImage(t2_patient_006)
-
-# Plot the 11th (index 10) slice of the equalized t2-weighted image for patient 0006
-plt.imshow(t2_patient_006_arr[10])
-plt.show()
-
-input("Press any key to continue...")
-'''
-# Take the 2D Fourier Transform of the slice
-t2_patient_006_ft_arr = sitk.GetArrayFromImage(t2_patient_006)
-t2_patient_006_ft_arr = np.fft.fft2(t2_patient_006_ft_arr[10])
-fshift = np.fft.fftshift(t2_patient_006_ft_arr)
-magnitude_spectrum = np.abs(fshift)
-log_magnitude_spectrum = np.log(np.abs(fshift))
-# plt.imshow(log_magnitude_spectrum)
-# plt.title("Log Magnitude Spectrum of Slice 11 of Patient 0006")
-# plt.show()
-
-# input("Press any key to continue...")
-
-inverse = np.fft.ifft2(fshift)
-plt.imshow(np.abs(inverse))
-plt.title("Inverse Fourier Transform after Setting Phase to 0")
-plt.show()
-
-input("Press any key to continue...")
-
-# Create a 3x3 Laplacian filter and apply it in the spatial domain
-laplacian_filter = np.matrix([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
-laplacian_filter_fft = np.fft.fft2(laplacian_filter)
-convolved_image_fft = signal.convolve2d(laplacian_filter_fft, fshift)
-inverse_convolved_image_fft = np.fft.ifft2(convolved_image_fft)
-
-plt.imshow(np.abs(inverse_convolved_image_fft))
-plt.title("Prostate for slice 11 of Patient 0006 after Applying a Laplacian Filter")
-plt.show()
-"""
 # Image Resampling
 
 
@@ -106,6 +60,41 @@ def resample_all_images(modality, out_spacing, some_missing=False):
     return [resample_image(image, out_spacing) if image != "" else "" for image in modality]
 
 
+def image_cropper(findings_dataframe, resampled_images,
+                  crop_width, crop_height, crop_depth):
+    """
+    Given a dataframe with the findings of cancer, a list of images, and a desired width, height,
+    and depth, this function returns a set of cropped versions of the original images of dimension
+    crop_width x crop_height x crop_depth
+    :param findings_dataframe: A pandas dataframe containing the LPS coordinates of the cancer
+    :param resampled_images: A list of images that have been resampled to all have the same
+    spacing
+    :param crop_width: The desired width of a patch
+    :param crop_height: The desired height of a patch
+    :param crop_depth: The desired depth of a patch
+    :return: A list of cropped versions of the original re-sampled images
+    """
+
+    crops = []
+    for idx, patient in findings_dataframe.iterrows():
+        patient_id = patient["patient_id"]
+        patient_image = resampled_images[int(patient_id[-4:])]
+        if patient_image == '':
+            crops.append('')
+        else:
+            lps = [float(loc) for loc in patient["pos"].split(' ') if loc != '']
+            i_coord, j_coord, k_coord = patient_image.TransformPhysicalPointToIndex(lps)
+
+            # Below code makes a crop of dimensions crop_width x crop_height x crop_depth
+            crop = patient_image[i_coord - crop_width//2: i_coord + int(np.ceil(crop_width/2)),
+                                 j_coord - crop_height//2: j_coord + int(np.ceil(crop_height/2)),
+                                 k_coord - crop_depth//2: k_coord + int(np.ceil(crop_depth/2))]
+
+            crops.append(crop)
+
+    return crops
+
+
 if __name__ == "__main__":
     patients = create_patients()
     t2 = [sitk.ReadImage(patients[patient_number]["t2"]) for patient_number in range(len(patients))]
@@ -114,42 +103,60 @@ if __name__ == "__main__":
             else "" for patient_number in range(len(patients))]
 
     # Re-sampling all the images
-    location = r"/home/andrewg/PycharmProjects/assignments/resampled/t2/t2_{}.nrrd"
+    location = r"/home/andrewg/PycharmProjects/assignments/resampled/t2/{}.nrrd"
     if not(os.listdir(r"/home/andrewg/PycharmProjects/assignments/resampled/t2")):
         t2[:] = resample_all_images(t2, out_spacing=(0.5, 0.5, 3))
         for patient_number, image in enumerate(t2):
-            sitk.WriteImage(image, location.format(patient_number))
+            # The 7th index is the position in the path which specifies which patient we are on
+            sitk.WriteImage(image,
+                            location.format(patients[patient_number]["t2"].split('/')[7]))
     else:
-        t2 = [sitk.ReadImage(location.format(patient_number))
+        t2 = [sitk.ReadImage(location.format(patients[patient_number]["t2"].split('/')[7]))
               for patient_number in range(len(patients))]
 
-    location = r"/home/andrewg/PycharmProjects/assignments/resampled/adc/adc_{}.nrrd"
+    location = r"/home/andrewg/PycharmProjects/assignments/resampled/adc/{}.nrrd"
     if not(os.listdir(r"/home/andrewg/PycharmProjects/assignments/resampled/adc")):
         adc[:] = resample_all_images(adc, out_spacing=(2, 2, 3))
         for patient_number, image in enumerate(adc):
-            sitk.WriteImage(image, location.format(patient_number))
+            sitk.WriteImage(image,
+                            location.format(patients[patient_number]["adc"].split('/')[7]))
     else:
-        adc = [sitk.ReadImage(location.format(patient_number))
+        adc = [sitk.ReadImage(location.format(patients[patient_number]["adc"].split('/')[7]))
                for patient_number in range(len(patients))]
 
-    location = r"/home/andrewg/PycharmProjects/assignments/resampled/bval/bval_{}.nrrd"
+    location = r"/home/andrewg/PycharmProjects/assignments/resampled/bval/{}.nrrd"
     if not(os.listdir(r"/home/andrewg/PycharmProjects/assignments/resampled/bval")):
         bval[:] = resample_all_images(bval, out_spacing=(2, 2, 3))
         for patient_number, image in enumerate(bval):
             if image != "":
-                sitk.WriteImage(image, location.format(patient_number))
+                sitk.WriteImage(image,
+                                location.format(patients[patient_number]["bval"].split('/')[7]))
     else:
         def read_special_case(patient_number):
             try:
-                return sitk.ReadImage(location.format(patient_number))
+                return sitk.ReadImage(
+                    location.format(patients[patient_number]["bval"].split('/')[7]))
             except:
                 return ""
 
         bval = [read_special_case(patient_number)
                 for patient_number in range(len(patients))]
 
-    plt.imshow(sitk.GetArrayFromImage(t2[0])[10])
-    plt.show()
+    # Open up the findings csv
+    findings = pd.read_csv(r"/home/andrewg/PycharmProjects/assignments/" +
+                           "ProstateX-TrainingLesionInformationv2/ProstateX-Findings-Train.csv")
+
+    new_columns = ["patient_id"]
+    new_columns.extend(findings.columns[1:])  # The original first column was unnamed
+    findings.columns = new_columns
+
+    desired_patch_dimensions = (32, 32, 5)
+    cropped_images_t2 = image_cropper(findings, t2, *desired_patch_dimensions)
+    cropped_images_adc = image_cropper(findings, adc, *desired_patch_dimensions)
+    cropped_images_bval = image_cropper(findings, bval, *desired_patch_dimensions)
+
+    
+
 
 
 

@@ -11,6 +11,8 @@ t2_patient_006 = sitk.ReadImage(r"/home/andrewg/PycharmProjects/assignments/data
                                 r"4-t2tsetra-98209/4-t2tsetra-98209.nrrd")
 
 # Image Resampling
+
+
 def resample_image(itk_image, out_spacing, is_label=False):
     """
     Retrieved this function from:
@@ -74,7 +76,7 @@ def image_cropper(findings_dataframe, resampled_images, padding,
     :return: A list of cropped versions of the original re-sampled images
     """
 
-    crops = []
+    crops = {}
     for idx, patient in findings_dataframe.iterrows():
         patient_id = patient["patient_id"]
         patient_image = resampled_images[int(patient_id[-4:])]
@@ -90,27 +92,31 @@ def image_cropper(findings_dataframe, resampled_images, padding,
                                  j_coord - crop_height//2: j_coord + int(np.ceil(crop_height/2)),
                                  k_coord - crop_depth//2: k_coord + int(np.ceil(crop_depth/2))]
 
-            crops.append((patient_id, crop))
-
+            if patient_id in crops.keys():
+                crops[patient_id].append(crop)
+            else:
+                crops[patient_id] = [crop]
     return crops
 
 
-def write_cropped_images(cropped_images, modality, patient_list):
+def write_cropped_images(cropped_images, modality):
     """
 
     :param cropped_images:
     :param modality:
-    :param patient_list:
     :return:
     """
 
     destination = \
-        r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/{}/{}.nrrd".format(
-                                                                                modality, "{}")
-    for patient_number, image in enumerate(cropped_images):
-        if image != '':
-            sitk.WriteImage(image, destination.format(
-                patient_list[patient_number][modality].split('/')[7]))
+        r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/{}/{}_{}.nrrd".format(
+                                                                            modality, "{}", "{}")
+
+    for patient_number in cropped_images.keys():
+        fid_number = 0
+        for patient_image in cropped_images[patient_number]:
+            sitk.WriteImage(patient_image, destination.format(patient_number, fid_number))
+            fid_number += 1
+
 
 
 
@@ -170,18 +176,26 @@ if __name__ == "__main__":
     findings.columns = new_columns
 
     desired_patch_dimensions = (32, 32, 3)
-    padding = (4, 4, 5)
+    padding = (5, 4, 6)
     padding_filter = sitk.ConstantPadImageFilter()
     padding_filter.SetPadLowerBound(padding)
     padding_filter.SetPadUpperBound(padding)
     padding_filter.SetConstant(0)
     cropped_images_t2 = image_cropper(findings, t2, padding_filter, *desired_patch_dimensions)
-    # cropped_images_adc = image_cropper(findings, adc, *desired_patch_dimensions)
-    # cropped_images_bval = image_cropper(findings, bval, *desired_patch_dimensions)
-    '''
-    write_cropped_images(cropped_images_t2, "t2", patients)
-    write_cropped_images(cropped_images_adc, "adc", patients)
-    write_cropped_images(cropped_images_bval, "bval", patients)
-    '''
+    cropped_images_adc = image_cropper(findings, adc, padding_filter, *desired_patch_dimensions)
+    cropped_images_bval = image_cropper(findings, bval, padding_filter, *desired_patch_dimensions)
+
+
+    should_write_images = input("Would you like to write these cropped images to the " +
+                                "re-sampled_cropped directory? y/n ")
+    while should_write_images not in ['y', 'n']:
+        print("Sorry, invalid response.")
+        should_write_images = input("Would you like to write these cropped images to the " +
+                                    "re-sampled_cropped directory? y/n ")
+    if should_write_images == 'y':
+        write_cropped_images(cropped_images_t2, "t2")
+        write_cropped_images(cropped_images_adc, "adc")
+        write_cropped_images(cropped_images_bval, "bval")
+    print("Done")
 
 

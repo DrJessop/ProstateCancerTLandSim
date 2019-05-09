@@ -10,8 +10,6 @@ t2_patient_006 = sitk.ReadImage(r"/home/andrewg/PycharmProjects/assignments/data
                                 r"ProstateX-0006/10-21-2011-MR prostaat kanker detectie NDmc MCAPRODETN-79408/" +
                                 r"4-t2tsetra-98209/4-t2tsetra-98209.nrrd")
 
-# Image Resampling
-
 
 def resample_image(itk_image, out_spacing, is_label=False):
     """
@@ -101,10 +99,12 @@ def image_cropper(findings_dataframe, resampled_images, padding,
 
 def write_cropped_images(cropped_images, modality):
     """
-
-    :param cropped_images:
-    :param modality:
-    :return:
+    This function writes the cropped images of modality 'modality' (ex. t2-weighted, bval, etc.)
+    to the directory resampled_cropped
+    :param cropped_images: A dictionary where the key is the patient number and the value is
+    a list of the crops around all the relevant fiducials
+    :param modality: ex. t2, adc, bval
+    :return: None
     """
 
     destination = \
@@ -116,8 +116,6 @@ def write_cropped_images(cropped_images, modality):
         for patient_image in cropped_images[patient_number]:
             sitk.WriteImage(patient_image, destination.format(patient_number, fid_number))
             fid_number += 1
-
-
 
 
 if __name__ == "__main__":
@@ -176,7 +174,7 @@ if __name__ == "__main__":
     findings.columns = new_columns
 
     desired_patch_dimensions = (32, 32, 3)
-    padding = (5, 4, 6)
+    padding = (5, 4, 6)  # Necessary padding for fiducials that are on the border of an image
     padding_filter = sitk.ConstantPadImageFilter()
     padding_filter.SetPadLowerBound(padding)
     padding_filter.SetPadUpperBound(padding)
@@ -184,7 +182,6 @@ if __name__ == "__main__":
     cropped_images_t2 = image_cropper(findings, t2, padding_filter, *desired_patch_dimensions)
     cropped_images_adc = image_cropper(findings, adc, padding_filter, *desired_patch_dimensions)
     cropped_images_bval = image_cropper(findings, bval, padding_filter, *desired_patch_dimensions)
-
 
     should_write_images = input("Would you like to write these cropped images to the " +
                                 "re-sampled_cropped directory? y/n ")

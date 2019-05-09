@@ -11,16 +11,14 @@ t2_patient_006 = sitk.ReadImage(r"/home/andrewg/PycharmProjects/assignments/data
                                 r"4-t2tsetra-98209/4-t2tsetra-98209.nrrd")
 
 # Image Resampling
-
-
-def resample_image(itk_image, out_spacing=(1.0, 1.0, 1.0), is_label=False):
+def resample_image(itk_image, out_spacing, is_label=False):
     """
     Retrieved this function from:
     https://www.programcreek.com/python/example/96383/SimpleITK.sitkNearestNeighbor
     :param itk_image: The image that we would like to resample
     :param out_spacing: The new spacing of the voxels we would like
     :param is_label: If True, use kNearestNeighbour interpolation, else use BSpline
-    :return: The resampled image
+    :return: The re-sampled image
     """
     original_spacing = itk_image.GetSpacing()
     original_size = itk_image.GetSize()
@@ -60,7 +58,7 @@ def resample_all_images(modality, out_spacing, some_missing=False):
     return [resample_image(image, out_spacing) if image != "" else "" for image in modality]
 
 
-def image_cropper(findings_dataframe, resampled_images,
+def image_cropper(findings_dataframe, resampled_images, padding,
                   crop_width, crop_height, crop_depth):
     """
     Given a dataframe with the findings of cancer, a list of images, and a desired width, height,
@@ -69,6 +67,7 @@ def image_cropper(findings_dataframe, resampled_images,
     :param findings_dataframe: A pandas dataframe containing the LPS coordinates of the cancer
     :param resampled_images: A list of images that have been resampled to all have the same
     spacing
+    :param padding: 0-Padding in the i,j,k directions
     :param crop_width: The desired width of a patch
     :param crop_height: The desired height of a patch
     :param crop_depth: The desired depth of a patch
@@ -80,8 +79,9 @@ def image_cropper(findings_dataframe, resampled_images,
         patient_id = patient["patient_id"]
         patient_image = resampled_images[int(patient_id[-4:])]
         if patient_image == '':
-            crops.append('')
+            crops.append((patient_id, ''))
         else:
+            patient_image = padding.Execute(patient_image)
             lps = [float(loc) for loc in patient["pos"].split(' ') if loc != '']
             i_coord, j_coord, k_coord = patient_image.TransformPhysicalPointToIndex(lps)
 
@@ -90,9 +90,28 @@ def image_cropper(findings_dataframe, resampled_images,
                                  j_coord - crop_height//2: j_coord + int(np.ceil(crop_height/2)),
                                  k_coord - crop_depth//2: k_coord + int(np.ceil(crop_depth/2))]
 
-            crops.append(crop)
+            crops.append((patient_id, crop))
 
     return crops
+
+
+def write_cropped_images(cropped_images, modality, patient_list):
+    """
+
+    :param cropped_images:
+    :param modality:
+    :param patient_list:
+    :return:
+    """
+
+    destination = \
+        r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/{}/{}.nrrd".format(
+                                                                                modality, "{}")
+    for patient_number, image in enumerate(cropped_images):
+        if image != '':
+            sitk.WriteImage(image, destination.format(
+                patient_list[patient_number][modality].split('/')[7]))
+
 
 
 if __name__ == "__main__":
@@ -150,13 +169,19 @@ if __name__ == "__main__":
     new_columns.extend(findings.columns[1:])  # The original first column was unnamed
     findings.columns = new_columns
 
-    desired_patch_dimensions = (32, 32, 5)
-    cropped_images_t2 = image_cropper(findings, t2, *desired_patch_dimensions)
-    cropped_images_adc = image_cropper(findings, adc, *desired_patch_dimensions)
-    cropped_images_bval = image_cropper(findings, bval, *desired_patch_dimensions)
-
-    
-
-
+    desired_patch_dimensions = (32, 32, 3)
+    padding = (4, 4, 5)
+    padding_filter = sitk.ConstantPadImageFilter()
+    padding_filter.SetPadLowerBound(padding)
+    padding_filter.SetPadUpperBound(padding)
+    padding_filter.SetConstant(0)
+    cropped_images_t2 = image_cropper(findings, t2, padding_filter, *desired_patch_dimensions)
+    # cropped_images_adc = image_cropper(findings, adc, *desired_patch_dimensions)
+    # cropped_images_bval = image_cropper(findings, bval, *desired_patch_dimensions)
+    '''
+    write_cropped_images(cropped_images_t2, "t2", patients)
+    write_cropped_images(cropped_images_adc, "adc", patients)
+    write_cropped_images(cropped_images_bval, "bval", patients)
+    '''
 
 

@@ -1,14 +1,8 @@
 import SimpleITK as sitk
-import matplotlib.pyplot as plt
 import numpy as np
 from A1 import create_patients
 import os
 import pandas as pd
-
-
-t2_patient_006 = sitk.ReadImage(r"/home/andrewg/PycharmProjects/assignments/data/PROSTATEx/" +
-                                r"ProstateX-0006/10-21-2011-MR prostaat kanker detectie NDmc MCAPRODETN-79408/" +
-                                r"4-t2tsetra-98209/4-t2tsetra-98209.nrrd")
 
 
 def resample_image(itk_image, out_spacing, is_label=False):

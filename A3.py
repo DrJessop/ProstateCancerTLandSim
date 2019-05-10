@@ -49,26 +49,36 @@ def read_cropped_images(modality):
     return cropped_images
 
 
+def get_center(img):
+    width, height, depth = img.GetSize()
+    return img.TransformIndexToPhysicalPoint((width//2, height//2, depth//2))
+
+
 def resample(image, transform):
     # Output image Origin, Spacing, Size, Direction are taken from the reference
     # image in this call to Resample
     reference_image = image
-    interpolator = sitk.sitkCosineWindowedSinc
+    interpolator = sitk.sitkBSpline
     default_value = 100.0
     return sitk.Resample(image, reference_image, transform,
                          interpolator, default_value)
 
 
-def affine_rotate(image, transform, degrees=15.0):
-    parameters = np.array(transform.GetParameters())
-    new_transform = sitk.AffineTransform(transform)
-    matrix = np.array(transform.GetMatrix()).reshape((3, 3, 3))
-    radians = -np.pi * degrees / 180.
-    rotation = np.array([[np.cos(radians), -np.sin(radians)], [np.sin(radians), np.cos(radians)]])
-    new_matrix = np.dot(rotation, matrix)
-    new_transform.SetMatrix(new_matrix.ravel())
-    resampled = resample(image, new_transform)
-    return new_transform
+def rotation(image, degrees, axis1, axis2, dim=3):
+    """
+
+    :param image:
+    :param degrees:
+    :param axis1:
+    :param axis2:
+    :param dim:
+    :return:
+    """
+    affine = sitk.AffineTransform(dim)
+    affine.SetCenter(get_center(image))
+    radians = np.pi * degrees / 180
+    affine.Rotate(axis1, axis2, angle=radians)
+    return resample(image, affine)
 
 
 def data_augmentation(small_class, modality, amount_needed):
@@ -115,6 +125,6 @@ if __name__ == "__main__":
     plt.title("Pie chart of cancer percentage vs non-cancer")
     plt.show()
 
-
+    # transform_45_degrees =
 
 

@@ -125,6 +125,6 @@ if __name__ == "__main__":
     plt.title("Pie chart of cancer percentage vs non-cancer")
     plt.show()
 
-    # transform_45_degrees =
+
 
 

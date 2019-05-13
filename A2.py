@@ -47,13 +47,14 @@ def resample_all_images(modality, out_spacing, some_missing=False):
     :return: Re-sampled images
     """
     if some_missing:
-        return [resample_image(image, out_spacing) if image != "" else ""
-                for image in modality]
-    return [resample_image(image, out_spacing) if image != "" else "" for image in modality]
+        return [resample_image(mod_image, out_spacing) if mod_image != "" else ""
+                for mod_image in modality]
+    return [resample_image(mod_image, out_spacing)
+            if mod_image != "" else "" for mod_image in modality]
 
 
 def image_cropper(findings_dataframe, resampled_images, padding,
-                  crop_width, crop_height, crop_depth):
+                  crop_width, crop_height, crop_depth, train=True):
     """
     Given a dataframe with the findings of cancer, a list of images, and a desired width, height,
     and depth, this function returns a set of cropped versions of the original images of dimension
@@ -69,11 +70,11 @@ def image_cropper(findings_dataframe, resampled_images, padding,
     """
 
     crops = {}
-    for idx, patient in findings_dataframe.iterrows():
+    for _, patient in findings_dataframe.iterrows():
         patient_id = patient["patient_id"]
         patient_image = resampled_images[int(patient_id[-4:])]
         if patient_image == '':
-            crops.append((patient_id, ''))
+            crops[patient_id] = ''
         else:
             patient_image = padding.Execute(patient_image)
             lps = [float(loc) for loc in patient["pos"].split(' ') if loc != '']
@@ -85,30 +86,45 @@ def image_cropper(findings_dataframe, resampled_images, padding,
                                  k_coord - crop_depth//2: k_coord + int(np.ceil(crop_depth/2))]
 
             if patient_id in crops.keys():
-                crops[patient_id].append(crop)
+                if train:
+                    crops[patient_id].append((crop, int(patient["ClinSig"])))
+                else:
+                    crops[patient_id].append(crop)
             else:
-                crops[patient_id] = [crop]
+                if train:
+                    crops[patient_id] = [(crop, int(patient["ClinSig"]))]
+                else:
+                    crops[patient_id] = [crop]
     return crops
 
 
-def write_cropped_images(cropped_images, modality):
+def write_cropped_images(cropped_images, modality, train=True):
     """
     This function writes the cropped images of modality 'modality' (ex. t2-weighted, bval, etc.)
     to the directory resampled_cropped
     :param cropped_images: A dictionary where the key is the patient number and the value is
     a list of the crops around all the relevant fiducials
     :param modality: ex. t2, adc, bval
+    :param train: Whether or not we are writing the training or test set
     :return: None
     """
 
-    destination = \
-        r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/{}/{}_{}.nrrd".format(
+    if train:
+        destination = \
+            r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/{}/{}_{}_{}.nrrd".format(
+                                                                            modality, "{}", "{}", "{}")
+    else:
+        destination = \
+            r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/test/{}/{}_{}.nrrd".format(
                                                                             modality, "{}", "{}")
-
     for patient_number in cropped_images.keys():
         fid_number = 0
         for patient_image in cropped_images[patient_number]:
-            sitk.WriteImage(patient_image, destination.format(patient_number, fid_number))
+            if train:
+                patient_image, cancer = patient_image
+                sitk.WriteImage(patient_image, destination.format(patient_number, fid_number, cancer))
+            else:
+                sitk.WriteImage(patient_image, destination.format(patient_number, fid_number))
             fid_number += 1
 
 
@@ -160,12 +176,19 @@ if __name__ == "__main__":
                 for patient_number in range(len(patients))]
 
     # Open up the findings csv
-    findings = pd.read_csv(r"/home/andrewg/PycharmProjects/assignments/" +
-                           "ProstateX-TrainingLesionInformationv2/ProstateX-Findings-Train.csv")
+    findings_train = pd.read_csv(r"{}{}".format("/home/andrewg/PycharmProjects/assignments/",
+                                 "ProstateX-TrainingLesionInformationv2/ProstateX-Findings-Train.csv"))
+
+    findings_test = pd.read_csv(r"{}{}".format("/home/andrewg/PycharmProjects/assignments/",
+                                                "ProstateX-TestLesionInformation/ProstateX-Findings-Test.csv"))
 
     new_columns = ["patient_id"]
-    new_columns.extend(findings.columns[1:])  # The original first column was unnamed
-    findings.columns = new_columns
+    new_columns.extend(findings_train.columns[1:])  # The original first column was unnamed
+    findings_train.columns = new_columns
+
+    new_columns = ["patient_id"]
+    new_columns.extend(findings_test.columns[1:])
+    findings_test.columns = new_columns
 
     desired_patch_dimensions = (32, 32, 3)
     padding = (5, 4, 6)  # Necessary padding for fiducials that are on the border of an image
@@ -173,9 +196,15 @@ if __name__ == "__main__":
     padding_filter.SetPadLowerBound(padding)
     padding_filter.SetPadUpperBound(padding)
     padding_filter.SetConstant(0)
-    cropped_images_t2 = image_cropper(findings, t2, padding_filter, *desired_patch_dimensions)
-    cropped_images_adc = image_cropper(findings, adc, padding_filter, *desired_patch_dimensions)
-    cropped_images_bval = image_cropper(findings, bval, padding_filter, *desired_patch_dimensions)
+    cropped_images_t2_train = image_cropper(findings_train, t2, padding_filter, *desired_patch_dimensions, train=True)
+    cropped_images_adc_train = image_cropper(findings_train, adc, padding_filter, *desired_patch_dimensions, train=True)
+    cropped_images_bval_train = image_cropper(findings_train, bval, padding_filter, *desired_patch_dimensions, train=True)
+
+    cropped_images_t2_test = image_cropper(findings_test, t2, padding_filter, *desired_patch_dimensions, train=False)
+    cropped_images_adc_test = image_cropper(findings_test, adc, padding_filter, *desired_patch_dimensions, train=False)
+    cropped_images_bval_test = image_cropper(findings_test, bval, padding_filter, *desired_patch_dimensions,
+                                             train=False)
+
 
     should_write_images = input("Would you like to write these cropped images to the " +
                                 "re-sampled_cropped directory? y/n ")
@@ -184,9 +213,14 @@ if __name__ == "__main__":
         should_write_images = input("Would you like to write these cropped images to the " +
                                     "re-sampled_cropped directory? y/n ")
     if should_write_images == 'y':
-        write_cropped_images(cropped_images_t2, "t2")
-        write_cropped_images(cropped_images_adc, "adc")
-        write_cropped_images(cropped_images_bval, "bval")
+        write_cropped_images(cropped_images_t2_train, "t2", train=True)
+        write_cropped_images(cropped_images_adc_train, "adc", train=True)
+        write_cropped_images(cropped_images_bval_train, "bval", train=True)
+
+        write_cropped_images(cropped_images_t2_test, "t2", train=False)
+        write_cropped_images(cropped_images_adc_test, "adc", train=False)
+        write_cropped_images(cropped_images_bval_test, "bval", train=False)
+
     print("Done")
 
 

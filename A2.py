@@ -128,6 +128,35 @@ def write_cropped_images(cropped_images, modality, train=True):
             fid_number += 1
 
 
+def write_cropped_images_v2(cropped_images, modality, train=True):
+    """
+    This function writes the cropped images of modality 'modality' (ex. t2-weighted, bval, etc.)
+    to the directory resampled_cropped
+    :param cropped_images: A dictionary where the key is the patient number and the value is
+    a list of the crops around all the relevant fiducials
+    :param modality: ex. t2, adc, bval
+    :param train: Whether or not we are writing the training or test set
+    :return: None
+    """
+
+    if train:
+        destination = \
+            r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/{}/{}_{}.nrrd".format(
+                                                                            modality, "{}", "{}")
+    else:
+        destination = \
+            r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/test/{}/{}.nrrd".format(
+                                                                            modality, "{}")
+
+    patient_images = [patient_image for key in cropped_images.keys() for patient_image in cropped_images[key]]
+    for p_id in range(len(patient_images)):
+        if train:
+            patient_image, cancer = patient_images[p_id]
+            sitk.WriteImage(patient_image, destination.format(p_id, cancer))
+        else:
+            sitk.WriteImage(patient_images[p_id], destination.format(p_id))
+
+
 if __name__ == "__main__":
     patients = create_patients()
     t2 = [sitk.ReadImage(patients[patient_number]["t2"]) for patient_number in range(len(patients))]
@@ -213,13 +242,13 @@ if __name__ == "__main__":
         should_write_images = input("Would you like to write these cropped images to the " +
                                     "re-sampled_cropped directory? y/n ")
     if should_write_images == 'y':
-        write_cropped_images(cropped_images_t2_train, "t2", train=True)
-        write_cropped_images(cropped_images_adc_train, "adc", train=True)
-        write_cropped_images(cropped_images_bval_train, "bval", train=True)
+        write_cropped_images_v2(cropped_images_t2_train, "t2", train=True)
+        write_cropped_images_v2(cropped_images_adc_train, "adc", train=True)
+        write_cropped_images_v2(cropped_images_bval_train, "bval", train=True)
 
-        write_cropped_images(cropped_images_t2_test, "t2", train=False)
-        write_cropped_images(cropped_images_adc_test, "adc", train=False)
-        write_cropped_images(cropped_images_bval_test, "bval", train=False)
+        write_cropped_images_v2(cropped_images_t2_test, "t2", train=False)
+        write_cropped_images_v2(cropped_images_adc_test, "adc", train=False)
+        write_cropped_images_v2(cropped_images_bval_test, "bval", train=False)
 
     print("Done")
 

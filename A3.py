@@ -129,43 +129,50 @@ def data_augmentation(small_class, modality, amount_needed):
     return
 
 
-def single_number_to_four_digit(num):
-    return ''.join(['0' for _ in range(3 - int(math.log(num, 10)))]) + str(num)
-
-
 class ProstateImages(Dataset):
-    def __init__(self, modality, train=True):
+    def __init__(self, modality, train, device):
         self.modality = modality
         self.train = train
+        self.device = device
 
     def __len__(self):
-        pass
+        if self.train:
+            length = len(os.listdir("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/{}".format(
+                                                                                                         self.modality))
+                         )
+        else:
+            length = len(os.listdir("/home/andrewg/PycharmProjects/assignments/resampled_cropped/test/{}".format(
+                                                                                                        self.modality))
+                         )
+        return length
 
-    def __getitem__(self, patient_id, fiducial_number):
+    def __getitem__(self, index):
         if self.train:
             path = "{}/{}".format(
-                "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/",
-                "ProstateX-{}_{}_{}.nrrd".format(single_number_to_four_digit(patient_id),
-                                                 fiducial_number)
+                "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train",
+                "{}/{}_{}.nrrd".format(self.modality, index, "{}")
             )
             try:
                 final_path = path.format(0)
-                image = sitk.ReadImage(path)
+                image = sitk.ReadImage(final_path)
             except:
                 final_path = path.format(1)
-                image = sitk.ReadImage(path)
-            cancer_label = int(final_path.split('.')[0][-1])  # The last digit in the file name specifies cancer/non-cancer
+                image = sitk.ReadImage(final_path)
+
+            # The last digit in the file name specifies cancer/non-cancer
+            cancer_label = int(final_path.split('.')[0][-1])
             output = {"image": image, "cancer": cancer_label}
 
         else:
             path = "{}/{}".format(
                 "/home/andrewg/PycharmProjects/assignments/resampled_cropped/test",
-                "ProstateX-{}_{}.nrrd".format(single_number_to_four_digit(patient_id),
-                                              fiducial_number)
+                "{}/{}.nrrd".format(self.modality)
             )
             image = sitk.ReadImage(path)
             output = {"image": image, "cancer": None}
 
+        output["image"] = sitk.GetArrayFromImage(output["image"]).astype('uint8')
+        output["image"] = torch.from_numpy(output["image"]).float().to(self.device)
         return output
 
 
@@ -174,7 +181,7 @@ if __name__ == "__main__":
     t2 = read_cropped_images("t2")
     adc = read_cropped_images("adc")
     bval = read_cropped_images("bval")
-
+    """
     normalize_data(t2)
     normalize_data(adc)
     normalize_data(bval)
@@ -211,5 +218,10 @@ if __name__ == "__main__":
     # img_arr = np.swapaxes(img_arr,0,2)[:,:,1]
     # plt.imshow(img_arr, cmap="gray"); plt.show()
 
-
-
+    """
+    ngpu = 1
+    device = torch.device("cuda:0" if (torch.cuda.is_available() and ngpu > 0) else "cpu")
+    p_images = ProstateImages(modality="t2", train=True, device=device)
+    dataloader = DataLoader(p_images, batch_size=20,
+                            shuffle=True)
+    print(iter(dataloader).__next__())

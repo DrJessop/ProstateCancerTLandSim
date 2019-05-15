@@ -1,19 +1,14 @@
 import os
 import SimpleITK as sitk
-import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import math
 import torch
 import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
 import torch.utils.data
-import torchvision.datasets as dset
 from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as transforms
-import torchvision.utils as vutils
 
 
 def normalize_data(data):
@@ -181,7 +176,7 @@ class CNN(nn.Module):
         self.dense1 = nn.Linear(in_features=1024, out_features=256)
         self.dense2 = nn.Linear(in_features=256, out_features=2)
 
-    def forward(self, data):
+    def forward_testing_method(self, data):
         print("Data going into the network is of shape {}".format(data.shape))
         data = data.unsqueeze(1)
         print("Data after reshaping is of shape {}".format(data.shape))
@@ -217,12 +212,77 @@ class CNN(nn.Module):
         data = self.dense2(data)
         print("Data after second dense layer is of shape {}".format(data.shape))
         data = nn.ReLU()(data)
-        data = nn.Softmax(data)
+        data = nn.LogSoftmax(1)(data)
+        print("Data after softmax is of shape {}".format(data.shape))
+        return data
+
+    def forward(self, data):
+        data = data.unsqueeze(1)
+        data = self.conv1(data)
+        data = data.squeeze(2)
+        data = nn.BatchNorm2d(32).cuda()(data)
+        data = nn.ReLU()(data)
+        data = self.conv2(data)
+        data = nn.BatchNorm2d(32).cuda()(data)
+        data = nn.ReLU()(data)
+        data = self.max_pool1(data)
+        data = self.conv3(data)
+        data = nn.BatchNorm2d(64).cuda()(data)
+        data = nn.ReLU()(data)
+        data = self.conv4(data)
+        data = nn.BatchNorm2d(64).cuda()(data)
+        data = nn.ReLU()(data)
+        data = self.max_pool2(data)
+        data = self.conv5(data)
+        data = data.view(-1, 4 * 4 * 64)
+        data = self.dense1(data)
+        data = nn.ReLU()(data)
+        data = self.dense2(data)
+        data = nn.ReLU()(data)
+        data = nn.LogSoftmax(1)(data)
         return data
 
 
-def training():
+def train_model(train_data, val_data, model, epochs, optimizer, loss_function):
+    for epoch in range(epochs):
+        model.train()
+        num_training_batches = len(train_data)
+        train_iter = iter(train_data)
+        for batch_num in range(num_training_batches):
+            batch = next(train_iter)
+            images, class_vector = batch["image"], batch["cancer"]
+            model.zero_grad()
+            optimizer.zero_grad()
+            preds = model(images)
+            loss = loss_function(preds, class_vector.cuda())
+            loss.backward()
+            optimizer.step()
+        model.eval()
+        num_val_batches = len(val_data)
+        val_iter = iter(val_data)
+        with torch.no_grad():
+            for images, class_vector in val_data:
+                batch = next(val_iter)
+                images, class_vector = batch["image"], batch["cancer"]
+                preds = model(images)
+                loss = loss_function(preds, class_vector.cuda())
+                print("Eval error is {}".format(loss))
     return
+
+
+def weighted_sampling(image_directory):
+
+    image_folder_contents = os.listdir(image_directory)
+    target = np.array([int(file_name.split('.')[0][-1]) for file_name in image_folder_contents])
+
+    class_sample_count = np.array(
+        [len(np.where(target == t)[0]) for t in np.unique(target)])
+    weight = 1. / class_sample_count
+    samples_weight = np.array([weight[t] for t in target])
+    samples_weight = torch.from_numpy(samples_weight)
+    samples_weight = samples_weight.double()
+    sampler = torch.utils.data.WeightedRandomSampler(samples_weight, len(samples_weight))
+    return sampler
 
 
 if __name__ == "__main__":
@@ -268,16 +328,34 @@ if __name__ == "__main__":
     # plt.imshow(img_arr, cmap="gray"); plt.show()
 
     """
+
+    # Define hyper-parameters
+    batch_size = 20
+    optimizer = optim.Adam
+    loss_function = nn.NLLLoss()
+
     ngpu = 1
     device = torch.device("cuda:0" if (torch.cuda.is_available() and ngpu > 0) else "cpu")
+    image_folder_contents = os.listdir("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/t2")
+    num_images = len(image_folder_contents)
     p_images = ProstateImages(modality="t2", train=True, device=device)
-    dataloader = DataLoader(p_images, batch_size=20,
-                            shuffle=True)
+    sampler = weighted_sampling("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/t2")
+
+    # class_vector = torch.from_numpy(np.array([int(file_name.split('.')[0][-1]) for file_name in image_folder_contents]))
+
+    # sampler = StratifiedSampler(class_vector, batch_size=batch_size)
+
+    num_train = int(np.round(0.8 * num_images))
+    num_val = int(np.round(0.2 * num_images))
+    training, validation = torch.utils.data.random_split(p_images, (num_train, num_val))
+    dataloader_train = DataLoader(training, batch_size=batch_size)
+    dataloader_val = DataLoader(validation, batch_size=batch_size)
 
     cnn = CNN()
     cnn.cuda()
-    cnn(iter(dataloader).__next__()["image"])
+    optimizer = optimizer(cnn.parameters())
+    train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=5,
+                optimizer=optimizer, loss_function=loss_function)
 
-
-
+    # cnn.forward_testing_method(iter(dataloader_train).__next__()["image"])
 

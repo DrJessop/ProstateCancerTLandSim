@@ -86,27 +86,11 @@ def resample(image, transform):
                          interpolator, default_value)
 
 
-def rotation(image, degrees, axis1, axis2):
-    """
-    This function rotates an image by "degrees" degrees
-    :param image: An sitk image
-    :param degrees: The number of degrees we are trying to rotate the image by
-    :param axis1:
-    :param axis2:
-    :return:
-    """
-    affine = sitk.AffineTransform(3)
-    affine.SetCenter(get_center(image))
-    radians = np.pi * degrees / 180
-    affine.Rotate(axis1, axis2, angle=radians)
-    return resample(image, affine)
-
-
 def deg_to_rad(degs):
     return [np.pi * deg / 180 for deg in degs]
 
 
-def rotation3(image, theta_x, theta_y, theta_z):
+def rotation3d(image, theta_x, theta_y, theta_z, show=False):
     # theta_x, theta_y, theta_z = deg_to_rad()
     theta_x = np.pi * theta_x / 180
     theta_y = np.pi * theta_y / 180
@@ -117,7 +101,11 @@ def rotation3(image, theta_x, theta_y, theta_z):
     # print(euler_transform.GetCenter())
     euler_transform.SetRotation(theta_x, theta_y, theta_z)
     # euler_transform.SetTranslation((0, 2.5, 0))
-    return resample(image, euler_transform)
+    resampled_image = resample(image, euler_transform)
+    if show:
+        plt.imshow(sitk.GetArrayFromImage(resampled_image)[0])
+        plt.show()
+    return resampled_image
 
 
 def data_augmentation(small_class, modality, amount_needed):
@@ -130,6 +118,10 @@ def data_augmentation(small_class, modality, amount_needed):
 
 
 class ProstateImages(Dataset):
+    """
+    This class's sole purpose is to provide the framework for fetching training/test data for the data loader which
+    uses this class as a parameter
+    """
     def __init__(self, modality, train, device):
         self.modality = modality
         self.train = train
@@ -174,6 +166,63 @@ class ProstateImages(Dataset):
         output["image"] = sitk.GetArrayFromImage(output["image"]).astype('uint8')
         output["image"] = torch.from_numpy(output["image"]).float().to(self.device)
         return output
+
+
+class CNN(nn.Module):
+    def __init__(self):
+        super(CNN, self).__init__()
+        self.conv1 = nn.Conv3d(in_channels=1, out_channels=32, kernel_size=(3, 3, 3), stride=1)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=(3, 3), stride=1)
+        self.max_pool1 = nn.MaxPool2d(kernel_size=(2, 2), stride=2)
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3), stride=1)
+        self.conv4 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=(3, 3), stride=1)
+        self.max_pool2 = nn.MaxPool2d(kernel_size=(2, 2), stride=2)
+        self.conv5 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=(2, 2), stride=1)
+        self.dense1 = nn.Linear(in_features=1024, out_features=256)
+        self.dense2 = nn.Linear(in_features=256, out_features=2)
+
+    def forward(self, data):
+        print("Data going into the network is of shape {}".format(data.shape))
+        data = data.unsqueeze(1)
+        print("Data after reshaping is of shape {}".format(data.shape))
+        data = self.conv1(data)
+        print("Data after first convolution (3d) is of shape {}".format(data.shape))
+        data = data.squeeze(2)
+        print("Data after reshaping is of shape {}".format(data.shape))
+        data = nn.BatchNorm2d(32).cuda()(data)
+        data = nn.ReLU()(data)
+        data = self.conv2(data)
+        print("Data after second convolution (2d) is of shape {}".format(data.shape))
+        data = nn.BatchNorm2d(32).cuda()(data)
+        data = nn.ReLU()(data)
+        data = self.max_pool1(data)
+        print("Data after max pooling is of shape {}".format(data.shape))
+        data = self.conv3(data)
+        print("Data after third convolution (2d) is of shape {}".format(data.shape))
+        data = nn.BatchNorm2d(64).cuda()(data)
+        data = nn.ReLU()(data)
+        data = self.conv4(data)
+        print("Data after fourth convolution (2d) is of shape {}".format(data.shape))
+        data = nn.BatchNorm2d(64).cuda()(data)
+        data = nn.ReLU()(data)
+        data = self.max_pool2(data)
+        print("Data after max pooling is of shape {}".format(data.shape))
+        data = self.conv5(data)
+        print("Data after fifth convolution (2d) is of shape {}".format(data.shape))
+        data = data.view(-1, 4 * 4 * 64)
+        print("Data after reshaping is of shape {}".format(data.shape))
+        data = self.dense1(data)
+        print("Data after first dense layer is of shape {}".format(data.shape))
+        data = nn.ReLU()(data)
+        data = self.dense2(data)
+        print("Data after second dense layer is of shape {}".format(data.shape))
+        data = nn.ReLU()(data)
+        data = nn.Softmax(data)
+        return data
+
+
+def training():
+    return
 
 
 if __name__ == "__main__":
@@ -224,4 +273,11 @@ if __name__ == "__main__":
     p_images = ProstateImages(modality="t2", train=True, device=device)
     dataloader = DataLoader(p_images, batch_size=20,
                             shuffle=True)
-    print(iter(dataloader).__next__())
+
+    cnn = CNN()
+    cnn.cuda()
+    cnn(iter(dataloader).__next__()["image"])
+
+
+
+

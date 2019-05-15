@@ -1,29 +1,12 @@
 import os
 import SimpleITK as sitk
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.parallel
-import torch.backends.cudnn as cudnn
 import torch.optim as optim
 import torch.utils.data
 from torch.utils.data import Dataset, DataLoader
-
-
-def normalize_data(data):
-    """
-    This function normalizes images such that the mean is zero. Does so in-place.
-    :param data: A double-dictionary of patients where the first key is the patient number
-    and the second key is the fiducial number
-    :return: None
-    """
-    normalize_image_filter = sitk.NormalizeImageFilter()
-    for patient_number in data.keys():
-        for fiducial_number in data[patient_number]:
-            data[patient_number][fiducial_number] = normalize_image_filter.Execute(
-                                                        data[patient_number][fiducial_number]
-            )
 
 
 def read_cropped_images(modality):
@@ -55,63 +38,6 @@ def read_cropped_images(modality):
     return cropped_images
 
 
-def get_center(img):
-    """
-    This function returns the physical center point of a 3d sitk image
-    :param img: The sitk image we are trying to find the center of
-    :return: The physical center point of the image
-    """
-    width, height, depth = img.GetSize()
-    return img.TransformIndexToPhysicalPoint((int(np.ceil(width/2)),
-                                              int(np.ceil(height/2)),
-                                              int(np.ceil(depth/2))))
-
-
-def resample(image, transform):
-    """
-    This function resamples (updates) an image using a specified transform
-    :param image: The sitk image we are trying to transform
-    :param transform: An sitk transform (ex. resizing, rotation, etc.
-    :return: The transformed sitk image
-    """
-    reference_image = image
-    interpolator = sitk.sitkBSpline
-    default_value = 0
-    return sitk.Resample(image, reference_image, transform,
-                         interpolator, default_value)
-
-
-def deg_to_rad(degs):
-    return [np.pi * deg / 180 for deg in degs]
-
-
-def rotation3d(image, theta_x, theta_y, theta_z, show=False):
-    # theta_x, theta_y, theta_z = deg_to_rad()
-    theta_x = np.pi * theta_x / 180
-    theta_y = np.pi * theta_y / 180
-    theta_z = np.pi * theta_z / 180
-    euler_transform = sitk.Euler3DTransform()
-    image_center = get_center(image)
-    euler_transform.SetCenter(image_center)
-    # print(euler_transform.GetCenter())
-    euler_transform.SetRotation(theta_x, theta_y, theta_z)
-    # euler_transform.SetTranslation((0, 2.5, 0))
-    resampled_image = resample(image, euler_transform)
-    if show:
-        plt.imshow(sitk.GetArrayFromImage(resampled_image)[0])
-        plt.show()
-    return resampled_image
-
-
-def data_augmentation(small_class, modality, amount_needed):
-
-    destination = r"{}/{}".format("/home/andrewg/PycharmProjects/assignments",
-                                  "resampled_cropped_normalized_augmented")
-
-
-    return
-
-
 class ProstateImages(Dataset):
     """
     This class's sole purpose is to provide the framework for fetching training/test data for the data loader which
@@ -121,6 +47,7 @@ class ProstateImages(Dataset):
         self.modality = modality
         self.train = train
         self.device = device
+        self.normalize = sitk.NormalizeImageFilter()
 
     def __len__(self):
         if self.train:
@@ -158,7 +85,9 @@ class ProstateImages(Dataset):
             image = sitk.ReadImage(path)
             output = {"image": image, "cancer": None}
 
-        output["image"] = sitk.GetArrayFromImage(output["image"]).astype('uint8')
+        output["image"] = self.normalize.Execute(output["image"])
+        output["image"] = sitk.GetArrayFromImage(output["image"])
+        # print(output["image"].mean())
         output["image"] = torch.from_numpy(output["image"]).float().to(self.device)
         return output
 
@@ -245,6 +174,8 @@ class CNN(nn.Module):
 
 def train_model(train_data, val_data, model, epochs, optimizer, loss_function):
     for epoch in range(epochs):
+        print("Epoch {}".format(epoch))
+        print("Training mode")
         model.train()
         num_training_batches = len(train_data)
         train_iter = iter(train_data)
@@ -257,78 +188,23 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function):
             loss = loss_function(preds, class_vector.cuda())
             loss.backward()
             optimizer.step()
+            print("Batch {} error: {}".format(batch_num, loss))
+        print("\nEvaluation mode")
         model.eval()
         num_val_batches = len(val_data)
         val_iter = iter(val_data)
         with torch.no_grad():
-            for images, class_vector in val_data:
+            for batch_num in range(num_val_batches):
                 batch = next(val_iter)
                 images, class_vector = batch["image"], batch["cancer"]
                 preds = model(images)
                 loss = loss_function(preds, class_vector.cuda())
-                print("Eval error is {}".format(loss))
+                print("Eval error for batch {} is {}".format(batch_num, loss))
+        print()
     return
 
 
-def weighted_sampling(image_directory):
-
-    image_folder_contents = os.listdir(image_directory)
-    target = np.array([int(file_name.split('.')[0][-1]) for file_name in image_folder_contents])
-
-    class_sample_count = np.array(
-        [len(np.where(target == t)[0]) for t in np.unique(target)])
-    weight = 1. / class_sample_count
-    samples_weight = np.array([weight[t] for t in target])
-    samples_weight = torch.from_numpy(samples_weight)
-    samples_weight = samples_weight.double()
-    sampler = torch.utils.data.WeightedRandomSampler(samples_weight, len(samples_weight))
-    return sampler
-
-
 if __name__ == "__main__":
-
-    t2 = read_cropped_images("t2")
-    adc = read_cropped_images("adc")
-    bval = read_cropped_images("bval")
-    """
-    normalize_data(t2)
-    normalize_data(adc)
-    normalize_data(bval)
-
-    findings_df = pd.read_csv(r"/home/andrewg/PycharmProjects/assignments/" +
-                              "ProstateX-TrainingLesionInformationv2/ProstateX-Findings-Train.csv")
-    findings_df.ClinSig.apply(lambda clin_sig: int(clin_sig)).hist()
-    plt.title("Histogram of cancer (1) vs non-cancer (0)")
-    plt.show()
-
-    input("Press enter to continue...")
-
-    labels = "Cancer", "Non-Cancer"
-    num_cancer = sum(findings_df.ClinSig)
-    num_non_cancer = len(findings_df) - num_cancer
-
-    sizes = [num_cancer, num_non_cancer]
-    colors = ["yellowgreen", "lightblue"]
-    explode = (0, 0.1)  # explode 2nd slice
-
-    # Plot
-    plt.pie(sizes, explode=explode, labels=labels, colors=colors,
-            autopct="%1.1f%%", shadow=True, startangle=140)
-
-    plt.axis("equal")
-    plt.title("Pie chart of cancer percentage vs non-cancer")
-    plt.show()
-
-    # Create a training and validation set
-
-    # img = sitk.ReadImage(r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/t2/ProstateX-0000_0.nrrd")
-    # img_rot = rotation3(img, 0, 0, 0)
-    # img_arr = sitk.GetArrayFromImage(img_rot)
-    # img_arr = np.swapaxes(img_arr,0,2)[:,:,1]
-    # plt.imshow(img_arr, cmap="gray"); plt.show()
-
-    """
-
     # Define hyper-parameters
     batch_size = 20
     optimizer = optim.Adam
@@ -339,11 +215,6 @@ if __name__ == "__main__":
     image_folder_contents = os.listdir("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/t2")
     num_images = len(image_folder_contents)
     p_images = ProstateImages(modality="t2", train=True, device=device)
-    sampler = weighted_sampling("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/t2")
-
-    # class_vector = torch.from_numpy(np.array([int(file_name.split('.')[0][-1]) for file_name in image_folder_contents]))
-
-    # sampler = StratifiedSampler(class_vector, batch_size=batch_size)
 
     num_train = int(np.round(0.8 * num_images))
     num_val = int(np.round(0.2 * num_images))
@@ -353,9 +224,7 @@ if __name__ == "__main__":
 
     cnn = CNN()
     cnn.cuda()
-    optimizer = optimizer(cnn.parameters())
+    optimizer = optimizer(cnn.parameters(), lr=0.00025)
     train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=5,
                 optimizer=optimizer, loss_function=loss_function)
-
-    # cnn.forward_testing_method(iter(dataloader_train).__next__()["image"])
 

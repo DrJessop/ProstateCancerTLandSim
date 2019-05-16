@@ -54,7 +54,7 @@ def resample_all_images(modality, out_spacing, some_missing=False):
 
 
 def image_cropper(findings_dataframe, resampled_images, padding,
-                  crop_width, crop_height, crop_depth, train=True):
+                  crop_width, crop_height, crop_depth, ofc=2, train=True):
     """
     Given a dataframe with the findings of cancer, a list of images, and a desired width, height,
     and depth, this function returns a set of cropped versions of the original images of dimension
@@ -66,25 +66,31 @@ def image_cropper(findings_dataframe, resampled_images, padding,
     :param crop_width: The desired width of a patch
     :param crop_height: The desired height of a patch
     :param crop_depth: The desired depth of a patch
+    :param ofc: Partitions the distance of the crop to be 1/ofc * dimension away to (ofc - 1)/ofc * dimension
+    away in the other direction
+    :param train: Boolean, represents whether these are crops of the training or the test set
     :return: A list of cropped versions of the original re-sampled images
     """
-
+    if ofc < 2:
+        print("Partitioning cannot be less than 2")
+        return
     crops = {}
     for _, patient in findings_dataframe.iterrows():
         patient_id = patient["patient_id"]
         patient_image = resampled_images[int(patient_id[-4:])]
         if patient_image == '':
-            crops[patient_id] = ''
+            continue
         else:
             patient_image = padding.Execute(patient_image)
             lps = [float(loc) for loc in patient["pos"].split(' ') if loc != '']
             i_coord, j_coord, k_coord = patient_image.TransformPhysicalPointToIndex(lps)
 
             # Below code makes a crop of dimensions crop_width x crop_height x crop_depth
-            crop = patient_image[i_coord - crop_width//2: i_coord + int(np.ceil(crop_width/2)),
-                                 j_coord - crop_height//2: j_coord + int(np.ceil(crop_height/2)),
-                                 k_coord - crop_depth//2: k_coord + int(np.ceil(crop_depth/2))]
-
+            crop = patient_image[i_coord - crop_width//ofc: i_coord + int(np.ceil(crop_width/((ofc-1)/ofc))),
+                                 j_coord - crop_height//ofc: j_coord + int(np.ceil(crop_height/((ofc-1)/ofc))),
+                                 k_coord - crop_depth//ofc: k_coord + int(np.ceil(crop_depth/((ofc-1)/ofc)))]
+            if crop.GetSize() != (crop_width, crop_height, crop_depth):
+                continue
             if patient_id in crops.keys():
                 if train:
                     crops[patient_id].append((crop, int(patient["ClinSig"])))
@@ -105,7 +111,7 @@ def write_cropped_images(cropped_images, modality, train=True):
     :param cropped_images: A dictionary where the key is the patient number and the value is
     a list of the crops around all the relevant fiducials
     :param modality: ex. t2, adc, bval
-    :param train: Whether or not we are writing the training or test set
+    :param train: Whether or not we are writing to the training or test set
     :return: None
     """
 
@@ -135,7 +141,7 @@ def write_cropped_images_v2(cropped_images, modality, train=True):
     :param cropped_images: A dictionary where the key is the patient number and the value is
     a list of the crops around all the relevant fiducials
     :param modality: ex. t2, adc, bval
-    :param train: Whether or not we are writing the training or test set
+    :param train: Whether or not we are writing to the training or test set
     :return: None
     """
 
@@ -220,7 +226,7 @@ if __name__ == "__main__":
     findings_test.columns = new_columns
 
     desired_patch_dimensions = (32, 32, 3)
-    padding = (5, 4, 6)  # Necessary padding for fiducials that are on the border of an image
+    padding = (8, 8, 6)  # Necessary padding for fiducials that are on the border of an image
     padding_filter = sitk.ConstantPadImageFilter()
     padding_filter.SetPadLowerBound(padding)
     padding_filter.SetPadUpperBound(padding)

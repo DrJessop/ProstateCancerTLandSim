@@ -5,6 +5,41 @@ import os
 import pprint as pp
 
 
+def matrix_from_axis_angle(a):
+    """Compute rotation matrix from axis-angle.
+    This is called exponential map or Rodrigues' formula.
+    Parameters
+    ----------
+    a : array-like, shape (4,)
+        Axis of rotation and rotation angle: (x, y, z, angle)
+    Returns
+    -------
+    R : array-like, shape (3, 3)
+        Rotation matrix
+    """
+    ux, uy, uz, theta = a
+    c = np.cos(theta)
+    s = np.sin(theta)
+    ci = 1.0 - c
+    R = np.array([[ci * ux * ux + c,
+                   ci * ux * uy - uz * s,
+                   ci * ux * uz + uy * s],
+                  [ci * uy * ux + uz * s,
+                   ci * uy * uy + c,
+                   ci * uy * uz - ux * s],
+                  [ci * uz * ux - uy * s,
+                   ci * uz * uy + ux * s,
+                   ci * uz * uz + c],
+                  ])
+
+    # This is equivalent to
+    # R = (np.eye(3) * np.cos(theta) +
+    #      (1.0 - np.cos(theta)) * a[:3, np.newaxis].dot(a[np.newaxis, :3]) +
+    #      cross_product_matrix(a[:3]) * np.sin(theta))
+
+    return R
+
+
 def resample(image, transform):
     """
     This function resamples (updates) an image using a specified transform
@@ -13,7 +48,7 @@ def resample(image, transform):
     :return: The transformed sitk image
     """
     reference_image = image
-    interpolator = sitk.sitkBSpline
+    interpolator = sitk.sitkLinear
     default_value = 0
     return sitk.Resample(image, reference_image, transform,
                          interpolator, default_value)
@@ -31,7 +66,7 @@ def get_center(img):
                                               int(np.ceil(depth/2))))
 
 
-def rotation3d(image, theta_x, theta_y, theta_z, show=False):
+def rotation3d(image, theta_z, show=False):
     """
     This function rotates an image across each of the x, y, z axes by theta_x, theta_y, and theta_z degrees
     respectively
@@ -42,16 +77,18 @@ def rotation3d(image, theta_x, theta_y, theta_z, show=False):
     :param show: Boolean, whether or not the user wants to see the result of the rotation
     :return: The rotated image
     """
-    theta_x = np.deg2rad(theta_x)
-    theta_y = np.deg2rad(theta_y)
     theta_z = np.deg2rad(theta_z)
-    euler_transform = sitk.Euler3DTransform(get_center(image), theta_x, theta_y, theta_z, (0, 0, 0))
+    euler_transform = sitk.Euler3DTransform()
     image_center = get_center(image)
     euler_transform.SetCenter(image_center)
-    euler_transform.SetRotation(theta_x, theta_y, theta_z)
+
+    direction = image.GetDirection()
+    axis_angle = (direction[2], direction[5], direction[8], theta_z)
+    np_rot_mat = matrix_from_axis_angle(axis_angle)
     resampled_image = resample(image, euler_transform)
     if show:
-        plt.imshow(sitk.GetArrayFromImage(resampled_image)[0])
+        slice_num = int(input("Enter the index of the slice you would like to see"))
+        plt.imshow(sitk.GetArrayFromImage(resampled_image)[slice_num])
         plt.show()
     return resampled_image
 

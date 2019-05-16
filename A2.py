@@ -54,7 +54,7 @@ def resample_all_images(modality, out_spacing, some_missing=False):
 
 
 def image_cropper(findings_dataframe, resampled_images, padding,
-                  crop_width, crop_height, crop_depth, ofc=2, train=True):
+                  crop_width, crop_height, crop_depth, num_crops_per_image=1, train=True):
     """
     Given a dataframe with the findings of cancer, a list of images, and a desired width, height,
     and depth, this function returns a set of cropped versions of the original images of dimension
@@ -66,18 +66,24 @@ def image_cropper(findings_dataframe, resampled_images, padding,
     :param crop_width: The desired width of a patch
     :param crop_height: The desired height of a patch
     :param crop_depth: The desired depth of a patch
-    :param ofc: Partitions the distance of the crop to be 1/ofc * dimension away to (ofc - 1)/ofc * dimension
-    away in the other direction
+    :param num_crops: The number of crops desired for a given image
     :param train: Boolean, represents whether these are crops of the training or the test set
     :return: A list of cropped versions of the original re-sampled images
     """
-    if ofc < 2:
-        print("Partitioning cannot be less than 2")
-        return
+
+    '''
+    TODO: Instead of ofc, have a numcrops function, and then take a bunch of crops around the image and 
+    append them to crops[patient_id]
+    '''
+    if num_crops_per_image < 1:
+        print("Cannot have less than 1 crop for an image")
+        exit()
     crops = {}
     for _, patient in findings_dataframe.iterrows():
         patient_id = patient["patient_id"]
         patient_image = resampled_images[int(patient_id[-4:])]
+        if train:
+            cancer_marker = int(patient["ClinSig"])  # 1 if cancer, else 0
         if patient_image == '':
             continue
         else:
@@ -86,21 +92,41 @@ def image_cropper(findings_dataframe, resampled_images, padding,
             i_coord, j_coord, k_coord = patient_image.TransformPhysicalPointToIndex(lps)
 
             # Below code makes a crop of dimensions crop_width x crop_height x crop_depth
-            crop = patient_image[i_coord - crop_width//ofc: i_coord + int(np.ceil(crop_width/((ofc-1)/ofc))),
-                                 j_coord - crop_height//ofc: j_coord + int(np.ceil(crop_height/((ofc-1)/ofc))),
-                                 k_coord - crop_depth//ofc: k_coord + int(np.ceil(crop_depth/((ofc-1)/ofc)))]
-            if crop.GetSize() != (crop_width, crop_height, crop_depth):
-                continue
-            if patient_id in crops.keys():
-                if train:
-                    crops[patient_id].append((crop, int(patient["ClinSig"])))
+            for crop_num in range(num_crops_per_image):
+                dist_from_i_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
+                dist_from_j_coord = np.random.choice((np.random.randint(-3, -1), np.random.randint(2, 4)))
+                dist_from_k_coord = np.random.choice((np.random.randint(-3, -1), np.random.randint(2, 4)))
+                i_sign = np.sign(dist_from_i_coord)
+                j_sign = np.sign(dist_from_j_coord)
+                k_sign = np.sign(dist_from_k_coord)
+
+                i_offset1 = crop_width // dist_from_i_coord
+                i_offset2 = i_sign * (crop_width - abs(i_offset1))
+
+                j_offset1 = crop_height // dist_from_j_coord
+                j_offset2 = j_sign * (crop_width - abs(j_offset1))
+
+                k_offset1 = crop_depth // dist_from_k_coord
+                k_offset2 = k_sign * (crop_depth - abs(k_offset1))
+
+                crop = patient_image[i_coord - i_offset1: i_coord + i_offset2: i_sign,
+                                     j_coord - j_offset1: j_coord + j_offset2: j_sign,
+                                     k_coord - k_offset1: k_coord + k_offset2: k_sign]
+                if crop.GetSize() != (crop_width, crop_height, crop_depth):
+                    print("There seems to be a problem with patient id={}".format(patient_id))
+                    continue
+                if patient_id in crops.keys():
+                    if train:
+                        crops[patient_id].append((crop, cancer_marker))
+                    else:
+                        crops[patient_id].append(crop)
                 else:
-                    crops[patient_id].append(crop)
-            else:
-                if train:
-                    crops[patient_id] = [(crop, int(patient["ClinSig"]))]
-                else:
-                    crops[patient_id] = [crop]
+                    if train:
+                        crops[patient_id] = [(crop, cancer_marker)]
+                    else:
+                        crops[patient_id] = [crop]
+                if train and cancer_marker == 0:
+                    break  # We do not need to generate multiple instances of non-cancer data
     return crops
 
 
@@ -231,15 +257,19 @@ if __name__ == "__main__":
     padding_filter.SetPadLowerBound(padding)
     padding_filter.SetPadUpperBound(padding)
     padding_filter.SetConstant(0)
-    cropped_images_t2_train = image_cropper(findings_train, t2, padding_filter, *desired_patch_dimensions, train=True)
-    cropped_images_adc_train = image_cropper(findings_train, adc, padding_filter, *desired_patch_dimensions, train=True)
-    cropped_images_bval_train = image_cropper(findings_train, bval, padding_filter, *desired_patch_dimensions, train=True)
+    cropped_images_t2_train = image_cropper(findings_train, t2, padding_filter, *desired_patch_dimensions,
+                                            num_crops_per_image=3, train=True)
+    cropped_images_adc_train = image_cropper(findings_train, adc, padding_filter, *desired_patch_dimensions,
+                                             num_crops_per_image=3, train=True)
+    cropped_images_bval_train = image_cropper(findings_train, bval, padding_filter, *desired_patch_dimensions,
+                                              num_crops_per_image=3, train=True)
 
-    cropped_images_t2_test = image_cropper(findings_test, t2, padding_filter, *desired_patch_dimensions, train=False)
-    cropped_images_adc_test = image_cropper(findings_test, adc, padding_filter, *desired_patch_dimensions, train=False)
+    cropped_images_t2_test = image_cropper(findings_test, t2, padding_filter, *desired_patch_dimensions,
+                                           train=False)
+    cropped_images_adc_test = image_cropper(findings_test, adc, padding_filter, *desired_patch_dimensions,
+                                            train=False)
     cropped_images_bval_test = image_cropper(findings_test, bval, padding_filter, *desired_patch_dimensions,
                                              train=False)
-
 
     should_write_images = input("Would you like to write these cropped images to the " +
                                 "re-sampled_cropped directory? y/n ")

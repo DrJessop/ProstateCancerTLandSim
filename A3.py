@@ -87,7 +87,6 @@ class ProstateImages(Dataset):
 
         output["image"] = self.normalize.Execute(output["image"])
         output["image"] = sitk.GetArrayFromImage(output["image"])
-        # print(output["image"].mean())
         output["image"] = torch.from_numpy(output["image"]).float().to(self.device)
         return output
 
@@ -205,6 +204,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function):
 
 
 if __name__ == "__main__":
+    """
     # Define hyper-parameters
     batch_size = 20
     optimizer = optim.Adam
@@ -227,4 +227,13 @@ if __name__ == "__main__":
     optimizer = optimizer(cnn.parameters(), lr=0.00025)
     train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=5,
                 optimizer=optimizer, loss_function=loss_function)
+    """
 
+    import os
+    contents = os.listdir("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/t2")
+    cancer = [f.split('.')[-1] for f in contents if f.split('.')[0][-1] == '1']
+    print(len(cancer), len(contents) - len(cancer))
+
+    import pandas as pd
+    a = pd.read_csv("/home/andrewg/PycharmProjects/assignments/ProstateX-TrainingLesionInformationv2/ProstateX-Findings-Train.csv")
+    print(len(a) - sum(a.ClinSig))

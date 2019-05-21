@@ -8,7 +8,7 @@ import torch.optim as optim
 import torch.utils.data
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, f1_score, auc
+from sklearn.metrics import confusion_matrix, f1_score, auc, roc_curve
 
 
 def read_cropped_images(modality):
@@ -128,7 +128,6 @@ class CNN(nn.Module):
         data = self.dense1(data)
         data = nn.ReLU()(data)
         data = self.dense2(data)
-        # data = nn.ReLU()(data)
         data = nn.Sigmoid()(data)
         return data
 
@@ -161,16 +160,32 @@ class CNNSimple(nn.Module):
 
 
 def train_model(train_data, val_data, model, epochs, batch_size, optimizer, loss_function, show=False):
-    print(loss_function)
+    """
+    This function trains a model with batches of a given size, and if show=True, plots the loss, f1, and auc scores for
+    the training and validation sets
+    :param train_data: A dataloader containing batches of the training set
+    :param val_data: A dataloader containing batches of the validation set
+    :param model: The network being trained
+    :param epochs: How many times the user wants the model trained on all of the training set data
+    :param batch_size: How many data points are in a batch
+    :param optimizer: Method used to update the network's weights
+    :param loss_function: How the model will be evaluated
+    :param show: Whether or not the user wants to see plots of loss, f1, and auc scores for the training and validation
+    sets
+    :return:
+    """
+    print("The loss function being used is {}".format(loss_function))
     errors = []
     eval_errors = []
     f1_train = []
+    auc_train = []
     f1_eval = []
+    auc_eval = []
+    num_training_batches = len(train_data)
     for epoch in range(epochs):
-        print("Epoch {}".format(epoch))
+        print("Epoch {}".format(epoch + 1))
         print("Training mode")
         model.train()
-        num_training_batches = len(train_data)
         train_iter = iter(train_data)
         model.zero_grad()
         train_loss = 0
@@ -189,11 +204,14 @@ def train_model(train_data, val_data, model, epochs, batch_size, optimizer, loss
             loss.backward()
             optimizer.step()
         train_loss_avg = train_loss / (num_training_batches*batch_size)
-        print("Training loss for epoch {} is {}".format(epoch, train_loss_avg))
-        print("Confusion matrix for epoch {}, tn={}, fp={}, fn={}, tp={}".format(epoch, *confusion_matrix(all_actual,
-                                                                                 all_preds).ravel()))
+        train_confusion_matrix = confusion_matrix(all_actual, all_preds).ravel()
+        print("Training loss for epoch {} is {}".format(epoch + 1, train_loss_avg))
+        print("Confusion matrix for epoch {}, tn={}, fp={}, fn={}, tp={}".format(epoch + 1, *train_confusion_matrix))
         f1_train.append(f1_score(all_actual, all_preds))
-        print("F1 score for epoch {} is {}\n".format(epoch, f1_train[-1]))
+        print("F1 score for epoch {} is {}".format(epoch + 1, f1_train[-1]))
+        fpr, tpr, _ = roc_curve(all_actual, all_preds, pos_label=1)
+        auc_train.append(auc(fpr, tpr))
+        print("AUC for epoch {} is {}\n".format(epoch + 1, auc_train[-1]))
         errors.append(train_loss_avg)
         print("Evaluation mode")
         model.eval()
@@ -213,14 +231,15 @@ def train_model(train_data, val_data, model, epochs, batch_size, optimizer, loss
                 all_preds.extend(hard_preds.squeeze(-1).tolist())
                 all_actual.extend(class_vector.squeeze(-1).tolist())
         eval_loss_avg = eval_loss / (num_val_batches*batch_size)
+        cm = confusion_matrix(all_actual, all_preds).ravel()
         print("Evaluation loss for epochs {} is {}".format(epoch, eval_loss_avg))
-        print("Evaluation Confusion matrix for epoch {}, tn={}, fp={}, fn={}, tp={}".format(epoch,
-                                                                                            *confusion_matrix(all_actual,
-                                                                                            all_preds).ravel()))
+        print("Evaluation Confusion matrix for epoch {}, tn={}, fp={}, fn={}, tp={}".format(epoch + 1, *cm))
         f1_eval.append(f1_score(all_actual, all_preds))
-        print("Evaluation F1 score for epoch {} is {}".format(epoch, f1_eval[-1]))
+        print("Evaluation F1 score for epoch {} is {}".format(epoch + 1, f1_eval[-1]))
+        fpr, tpr, _ = roc_curve(all_actual, all_preds, pos_label=1)
+        auc_eval.append(auc(fpr, tpr))
+        print("Evaluation AUC for epoch {} is {}\n".format(epoch + 1, auc_eval[-1]))
         eval_errors.append(eval_loss_avg)
-        print()
     if show:
         plt.plot(errors)
         plt.plot(eval_errors)
@@ -233,13 +252,19 @@ def train_model(train_data, val_data, model, epochs, batch_size, optimizer, loss
         plt.legend(["training f1", "validation f1"])
         plt.title("F1 Training vs F1 Cross-Validation")
         plt.show()
+        input("Press enter to continue...")
+        plt.plot(auc_train)
+        plt.plot(auc_eval)
+        plt.legend(["training auc", "validation auc"])
+        plt.title("AUC Training vs AUC Cross-Validation")
+        plt.show()
     return
 
 
 if __name__ == "__main__":
     # Define hyper-parameters
     batch_size = 4
-    optimizer = optim.Adam
+    # optimizer = optim.Adam
     loss_function = nn.BCELoss()
 
     ngpu = 1
@@ -251,20 +276,19 @@ if __name__ == "__main__":
     num_train = int(np.round(0.8 * num_images))
     num_val = int(np.round(0.2 * num_images))
     training, validation = torch.utils.data.random_split(p_images, (num_train, num_val))
-    dataloader_train = DataLoader(training, batch_size=batch_size, shuffle=True)
+    dataloader_train = DataLoader(training, batch_size=batch_size, shuffle=False)
     dataloader_val = DataLoader(validation, batch_size=batch_size)
 
     # Model 1
     cnn = CNN()
     cnn.cuda()
     optimizer = optim.SGD(cnn.parameters(), lr=0.001, momentum=0.9)
-    train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=20,
+    train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=30,
                 batch_size=batch_size, optimizer=optimizer, loss_function=loss_function, show=True)
 
     # Model 2
     cnn2 = CNNSimple()
     cnn2.cuda()
-    cnn2(next(iter(dataloader_train))["image"])
     # optimizer = optim.Adam(cnn2.parameters(), lr=0.005)
     optimizer = optim.SGD(cnn2.parameters(), lr=0.001, momentum=0.9)
     # train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn2, epochs=30,

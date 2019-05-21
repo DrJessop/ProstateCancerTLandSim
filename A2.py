@@ -3,6 +3,8 @@ import numpy as np
 from A1 import create_patients
 import os
 import pandas as pd
+from image_augmentation import rotation3d
+import matplotlib.pyplot as plt
 
 
 def resample_image(itk_image, out_spacing, is_label=False):
@@ -66,7 +68,7 @@ def image_cropper(findings_dataframe, resampled_images, padding,
     :param crop_width: The desired width of a patch
     :param crop_height: The desired height of a patch
     :param crop_depth: The desired depth of a patch
-    :param num_crops: The number of crops desired for a given image
+    :param num_crops_per_image: The number of crops desired for a given image
     :param train: Boolean, represents whether these are crops of the training or the test set
     :return: A list of cropped versions of the original re-sampled images
     """
@@ -78,6 +80,7 @@ def image_cropper(findings_dataframe, resampled_images, padding,
     if num_crops_per_image < 1:
         print("Cannot have less than 1 crop for an image")
         exit()
+    degrees = [5, 10, 15, 20, 25]
     crops = {}
     for _, patient in findings_dataframe.iterrows():
         patient_id = patient["patient_id"]
@@ -88,30 +91,40 @@ def image_cropper(findings_dataframe, resampled_images, padding,
             continue
         else:
             patient_image = padding.Execute(patient_image)
-            lps = [float(loc) for loc in patient["pos"].split(' ') if loc != '']
-            i_coord, j_coord, k_coord = patient_image.TransformPhysicalPointToIndex(lps)
 
+            lps = [float(loc) for loc in patient["pos"].split(' ') if loc != '']
+            i_coord, j_coord, k_coord = patient_image.TransformPhysicalPointToIndex(lps)  # Convert LPS to IJK
             # Below code makes a crop of dimensions crop_width x crop_height x crop_depth
             for crop_num in range(num_crops_per_image):
-                dist_from_i_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
-                dist_from_j_coord = np.random.choice((np.random.randint(-3, -1), np.random.randint(2, 4)))
-                dist_from_k_coord = np.random.choice((np.random.randint(-3, -1), np.random.randint(2, 4)))
-                i_sign = np.sign(dist_from_i_coord)
-                j_sign = np.sign(dist_from_j_coord)
-                k_sign = np.sign(dist_from_k_coord)
+                if crop_num == 0:  # The first crop we want to guarantee has the ROI exactly in the center
+                    crop = patient_image[i_coord - crop_width // 2: i_coord + int(np.ceil(crop_width / 2)),
+                                         j_coord - crop_height // 2: j_coord + int(np.ceil(crop_height / 2)),
+                                         k_coord - crop_depth // 2: k_coord + int(np.ceil(crop_depth / 2))]
+                else:
+                    dist_from_i_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
+                    dist_from_j_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
+                    dist_from_k_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
+                    i_sign = np.sign(dist_from_i_coord)
+                    j_sign = np.sign(dist_from_j_coord)
+                    k_sign = np.sign(dist_from_k_coord)
 
-                i_offset1 = crop_width // dist_from_i_coord
-                i_offset2 = i_sign * (crop_width - abs(i_offset1))
+                    i_offset1 = crop_width // dist_from_i_coord
+                    i_offset2 = i_sign * (crop_width - abs(i_offset1))
 
-                j_offset1 = crop_height // dist_from_j_coord
-                j_offset2 = j_sign * (crop_width - abs(j_offset1))
+                    j_offset1 = crop_height // dist_from_j_coord
+                    j_offset2 = j_sign * (crop_width - abs(j_offset1))
 
-                k_offset1 = crop_depth // dist_from_k_coord
-                k_offset2 = k_sign * (crop_depth - abs(k_offset1))
+                    k_offset1 = crop_depth // dist_from_k_coord
+                    k_offset2 = k_sign * (crop_depth - abs(k_offset1))
 
-                crop = patient_image[i_coord - i_offset1: i_coord + i_offset2: i_sign,
-                                     j_coord - j_offset1: j_coord + j_offset2: j_sign,
-                                     k_coord - k_offset1: k_coord + k_offset2: k_sign]
+                    degree = np.random.choice(degrees)
+                    rotated_patient_image = rotation3d(patient_image, degree, lps)
+                    i_coord, j_coord, k_coord = rotated_patient_image.TransformPhysicalPointToIndex(lps)
+
+                    crop = rotated_patient_image[i_coord - i_offset1: i_coord + i_offset2: i_sign,
+                                                 j_coord - j_offset1: j_coord + j_offset2: j_sign,
+                                                 k_coord - k_offset1: k_coord + k_offset2: k_sign]
+
                 if crop.GetSize() != (crop_width, crop_height, crop_depth):
                     print("There seems to be a problem with patient id={}".format(patient_id))
                     continue

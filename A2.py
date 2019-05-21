@@ -4,7 +4,6 @@ from A1 import create_patients
 import os
 import pandas as pd
 from image_augmentation import rotation3d
-import matplotlib.pyplot as plt
 
 
 def resample_image(itk_image, out_spacing, is_label=False):
@@ -16,6 +15,7 @@ def resample_image(itk_image, out_spacing, is_label=False):
     :param is_label: If True, use kNearestNeighbour interpolation, else use BSpline
     :return: The re-sampled image
     """
+
     original_spacing = itk_image.GetSpacing()
     original_size = itk_image.GetSize()
 
@@ -48,11 +48,51 @@ def resample_all_images(modality, out_spacing, some_missing=False):
     of a missing image
     :return: Re-sampled images
     """
+
     if some_missing:
         return [resample_image(mod_image, out_spacing) if mod_image != "" else ""
                 for mod_image in modality]
     return [resample_image(mod_image, out_spacing)
             if mod_image != "" else "" for mod_image in modality]
+
+
+def rotated_crop(patient_image, crop_width, crop_height, crop_depth, degrees, lps):
+    """
+    This is a helper function for image_cropper, and it returns a crop around a rotated image
+    :param patient_image: The sitk image that is to be cropped
+    :param crop_width: The desired width of the crop
+    :param crop_height: The desired height of the crop
+    :param crop_depth: The desired depth of the crop
+    :param degrees: A list of all allowable degrees of rotation (gets converted to radians in the rotation3d function
+                    which is called below)
+    :param lps: The region of interest which will be the center of rotation
+    :return: The crop of the rotated image
+    """
+
+    dist_from_i_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
+    dist_from_j_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
+    dist_from_k_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
+    i_sign = np.sign(dist_from_i_coord)
+    j_sign = np.sign(dist_from_j_coord)
+    k_sign = np.sign(dist_from_k_coord)
+
+    i_offset1 = crop_width // dist_from_i_coord
+    i_offset2 = i_sign * (crop_width - abs(i_offset1))
+
+    j_offset1 = crop_height // dist_from_j_coord
+    j_offset2 = j_sign * (crop_width - abs(j_offset1))
+
+    k_offset1 = crop_depth // dist_from_k_coord
+    k_offset2 = k_sign * (crop_depth - abs(k_offset1))
+
+    degree = np.random.choice(degrees)
+    rotated_patient_image = rotation3d(patient_image, degree, lps)
+    i_coord, j_coord, k_coord = rotated_patient_image.TransformPhysicalPointToIndex(lps)
+
+    crop = rotated_patient_image[i_coord - i_offset1: i_coord + i_offset2: i_sign,
+                                 j_coord - j_offset1: j_coord + j_offset2: j_sign,
+                                 k_coord - k_offset1: k_coord + k_offset2: k_sign]
+    return crop
 
 
 def image_cropper(findings_dataframe, resampled_images, padding,
@@ -63,7 +103,7 @@ def image_cropper(findings_dataframe, resampled_images, padding,
     crop_width x crop_height x crop_depth
     :param findings_dataframe: A pandas dataframe containing the LPS coordinates of the cancer
     :param resampled_images: A list of images that have been resampled to all have the same
-    spacing
+                             spacing
     :param padding: 0-Padding in the i,j,k directions
     :param crop_width: The desired width of a patch
     :param crop_height: The desired height of a patch
@@ -73,14 +113,10 @@ def image_cropper(findings_dataframe, resampled_images, padding,
     :return: A list of cropped versions of the original re-sampled images
     """
 
-    '''
-    TODO: Instead of ofc, have a numcrops function, and then take a bunch of crops around the image and 
-    append them to crops[patient_id]
-    '''
     if num_crops_per_image < 1:
         print("Cannot have less than 1 crop for an image")
         exit()
-    degrees = [5, 10, 15, 20, 25]
+    degrees = [5, 10, 15, 20, 25]  # One of these is randomly chosen for every rotated crop
     crops = {}
     for _, patient in findings_dataframe.iterrows():
         patient_id = patient["patient_id"]
@@ -91,7 +127,6 @@ def image_cropper(findings_dataframe, resampled_images, padding,
             continue
         else:
             patient_image = padding.Execute(patient_image)
-
             lps = [float(loc) for loc in patient["pos"].split(' ') if loc != '']
             i_coord, j_coord, k_coord = patient_image.TransformPhysicalPointToIndex(lps)  # Convert LPS to IJK
             # Below code makes a crop of dimensions crop_width x crop_height x crop_depth
@@ -101,30 +136,7 @@ def image_cropper(findings_dataframe, resampled_images, padding,
                                          j_coord - crop_height // 2: j_coord + int(np.ceil(crop_height / 2)),
                                          k_coord - crop_depth // 2: k_coord + int(np.ceil(crop_depth / 2))]
                 else:
-                    dist_from_i_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
-                    dist_from_j_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
-                    dist_from_k_coord = np.random.choice((np.random.randint(-4, -1), np.random.randint(2, 5)))
-                    i_sign = np.sign(dist_from_i_coord)
-                    j_sign = np.sign(dist_from_j_coord)
-                    k_sign = np.sign(dist_from_k_coord)
-
-                    i_offset1 = crop_width // dist_from_i_coord
-                    i_offset2 = i_sign * (crop_width - abs(i_offset1))
-
-                    j_offset1 = crop_height // dist_from_j_coord
-                    j_offset2 = j_sign * (crop_width - abs(j_offset1))
-
-                    k_offset1 = crop_depth // dist_from_k_coord
-                    k_offset2 = k_sign * (crop_depth - abs(k_offset1))
-
-                    degree = np.random.choice(degrees)
-                    rotated_patient_image = rotation3d(patient_image, degree, lps)
-                    i_coord, j_coord, k_coord = rotated_patient_image.TransformPhysicalPointToIndex(lps)
-
-                    crop = rotated_patient_image[i_coord - i_offset1: i_coord + i_offset2: i_sign,
-                                                 j_coord - j_offset1: j_coord + j_offset2: j_sign,
-                                                 k_coord - k_offset1: k_coord + k_offset2: k_sign]
-
+                    crop = rotated_crop(patient_image, crop_width, crop_height, crop_depth, degrees, lps)
                 if crop.GetSize() != (crop_width, crop_height, crop_depth):
                     print("There seems to be a problem with patient id={}".format(patient_id))
                     continue
@@ -271,11 +283,11 @@ if __name__ == "__main__":
     padding_filter.SetPadUpperBound(padding)
     padding_filter.SetConstant(0)
     cropped_images_t2_train = image_cropper(findings_train, t2, padding_filter, *desired_patch_dimensions,
-                                            num_crops_per_image=3, train=True)
+                                            num_crops_per_image=5, train=True)
     cropped_images_adc_train = image_cropper(findings_train, adc, padding_filter, *desired_patch_dimensions,
-                                             num_crops_per_image=3, train=True)
+                                             num_crops_per_image=5, train=True)
     cropped_images_bval_train = image_cropper(findings_train, bval, padding_filter, *desired_patch_dimensions,
-                                              num_crops_per_image=3, train=True)
+                                              num_crops_per_image=5, train=True)
 
     cropped_images_t2_test = image_cropper(findings_test, t2, padding_filter, *desired_patch_dimensions,
                                            train=False)

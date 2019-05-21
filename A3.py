@@ -160,8 +160,7 @@ class CNNSimple(nn.Module):
         return data
 
 
-def train_model(train_data, val_data, model, epochs, optimizer, loss_function, show=False):
-    global batch_size
+def train_model(train_data, val_data, model, epochs, batch_size, optimizer, loss_function, show=False):
     print(loss_function)
     errors = []
     eval_errors = []
@@ -237,15 +236,6 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     return
 
 
-def weights_init(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        nn.init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
-        nn.init.normal_(m.weight.data, 1.0, 0.02)
-        nn.init.constant_(m.bias.data, 0)
-
-
 if __name__ == "__main__":
     # Define hyper-parameters
     batch_size = 4
@@ -261,7 +251,7 @@ if __name__ == "__main__":
     num_train = int(np.round(0.8 * num_images))
     num_val = int(np.round(0.2 * num_images))
     training, validation = torch.utils.data.random_split(p_images, (num_train, num_val))
-    dataloader_train = DataLoader(training, batch_size=batch_size)
+    dataloader_train = DataLoader(training, batch_size=batch_size, shuffle=True)
     dataloader_val = DataLoader(validation, batch_size=batch_size)
 
     # Model 1
@@ -269,7 +259,7 @@ if __name__ == "__main__":
     cnn.cuda()
     optimizer = optim.SGD(cnn.parameters(), lr=0.001, momentum=0.9)
     train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=20,
-                optimizer=optimizer, loss_function=loss_function, show=True)
+                batch_size=batch_size, optimizer=optimizer, loss_function=loss_function, show=True)
 
     # Model 2
     cnn2 = CNNSimple()
@@ -277,5 +267,5 @@ if __name__ == "__main__":
     cnn2(next(iter(dataloader_train))["image"])
     # optimizer = optim.Adam(cnn2.parameters(), lr=0.005)
     optimizer = optim.SGD(cnn2.parameters(), lr=0.001, momentum=0.9)
-    # train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn2, epochs=20,
-    #             optimizer=optimizer, loss_function=loss_function, show=True)
+    # train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn2, epochs=30,
+    #             batch_size=batch_size, optimizer=optimizer, loss_function=loss_function, show=True)

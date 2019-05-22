@@ -20,6 +20,7 @@ def read_cropped_images(modality):
     :return: A dictionary where the first key is a patient number and the second key is the
     fiducial number (with 0 indexing)
     """
+    
     cropped_images = {}
     destination = \
         r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/{}".format(modality)
@@ -46,6 +47,7 @@ class ProstateImages(Dataset):
     This class's sole purpose is to provide the framework for fetching training/test data for the data loader which
     uses this class as a parameter
     """
+
     def __init__(self, modality, train, device):
         self.modality = modality
         self.train = train
@@ -95,6 +97,10 @@ class ProstateImages(Dataset):
 
 
 class CNN(nn.Module):
+    """
+    Baseline CNN with 5 Conv layers and 2 linear layers.
+    """
+
     def __init__(self):
         super(CNN, self).__init__()
         self.conv1 = nn.Conv3d(in_channels=1, out_channels=32, kernel_size=(3, 3, 3), stride=1)
@@ -173,8 +179,9 @@ def train_model(train_data, val_data, model, epochs, batch_size, optimizer, loss
     :param loss_function: How the model will be evaluated
     :param show: Whether or not the user wants to see plots of loss, f1, and auc scores for the training and validation
     sets
-    :return:
+    :return: None
     """
+
     print("The loss function being used is {}".format(loss_function))
     errors = []
     eval_errors = []
@@ -261,6 +268,14 @@ def train_model(train_data, val_data, model, epochs, batch_size, optimizer, loss
 
 
 def test_predictions(dataloader, model, batch_size):
+    """
+    This function runs the model on the batches in the test set and returns a dataframe with ProxID, fid, and ClinSig
+    columns. The predictions x <- ClinSig, 0 <= x <= 1, x <- R.
+    :param dataloader: The data loader with the test batches
+    :param model: The trained pytorch model
+    :param batch_size: The size of a test batch
+    :return: A dataframe as described above
+    """
 
     predictions = pd.read_csv(r"/home/andrewg/PycharmProjects/assignments/ProstateX-TestLesionInformation/ProstateX-Findings-Test.csv")
     predictions.insert(4, "ClinSig", 0)
@@ -278,7 +293,6 @@ def test_predictions(dataloader, model, batch_size):
 if __name__ == "__main__":
     # Define hyper-parameters
     batch_size = 4
-    # optimizer = optim.Adam
     loss_function = nn.BCELoss()
 
     ngpu = 1
@@ -297,7 +311,7 @@ if __name__ == "__main__":
     cnn = CNN()
     cnn.cuda()
     optimizer = optim.SGD(cnn.parameters(), lr=0.001, momentum=0.9)
-    train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=10,
+    train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=15,
                 batch_size=batch_size, optimizer=optimizer, loss_function=loss_function, show=True)
 
     test_folder = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/test/adc"
@@ -306,4 +320,6 @@ if __name__ == "__main__":
     dataloader_test = DataLoader(p_images_test, batch_size=batch_size, shuffle=False)
 
     predictions = test_predictions(dataloader_test, cnn, batch_size)
-    predictions.to_csv(r"/home/andrewg/PycharmProjects/assignments/predictions/preds.csv")
+    predictions.to_csv(r"/home/andrewg/PycharmProjects/assignments/predictions/preds.csv", index=False)
+
+

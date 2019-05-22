@@ -2,14 +2,14 @@ import SimpleITK as sitk
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import pprint as pp
 
 
 def create_nrrd_files():
-    '''
-    This function loops through the XChallenge directory structure and creates an nrrd file for each dicom file subdirectory
-    :return:
-    '''
+    """
+    This function loops through the XChallenge directory structure and
+    creates an nrrd file for each dicom file subdirectory
+    :return: None
+    """
     xchallenge_directory = r"/home/andrewg/PycharmProjects/assignments/data/PROSTATEx"
 
     reader = sitk.ImageSeriesReader()
@@ -35,7 +35,7 @@ def create_nrrd_files():
 def find_nrrd(directory):
     """
     Given a directory, this function returns the nrrd file in the directory
-    :param directory_contents: string representing the location of the directory
+    :param directory: string representing the location of the directory
     :return: string with location of the nrrd file
     """
     directory_contents = os.listdir(directory)
@@ -53,7 +53,7 @@ def get_nrrd_files(directory):
     t2, adc, bval = "", "", ""
     directory_contents = os.listdir(directory)
     for sub_directory in directory_contents:
-        if "t2tse" in sub_directory:
+        if "t2tsetra" in sub_directory:
             path = "{}/{}".format(directory, sub_directory)
             t2 = "{}".format(find_nrrd(path))
         elif "ADC" in sub_directory:
@@ -229,4 +229,3 @@ if __name__ == "__main__":
     ktrans_image = sitk.GetArrayViewFromImage(ktrans_image)
     plt.imshow(ktrans_image[10])
     plt.show()
-

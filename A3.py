@@ -9,6 +9,7 @@ import torch.utils.data
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, f1_score, auc, roc_curve
+import pandas as pd
 
 
 def read_cropped_images(modality):
@@ -82,10 +83,10 @@ class ProstateImages(Dataset):
         else:
             path = "{}/{}".format(
                 "/home/andrewg/PycharmProjects/assignments/resampled_cropped/test",
-                "{}/{}.nrrd".format(self.modality)
+                "{}/{}.nrrd".format(self.modality, index)
             )
             image = sitk.ReadImage(path)
-            output = {"image": image, "cancer": None}
+            output = {"image": image}
 
         output["image"] = self.normalize.Execute(output["image"])
         output["image"] = sitk.GetArrayFromImage(output["image"])
@@ -246,19 +247,32 @@ def train_model(train_data, val_data, model, epochs, batch_size, optimizer, loss
         plt.title("Training (blue) vs Cross-Validation (orange) Error (BCELoss)")
         plt.legend(["training loss", "validation loss"])
         plt.show()
-        input("Press enter to continue...")
         plt.plot(f1_train)
         plt.plot(f1_eval)
         plt.legend(["training f1", "validation f1"])
         plt.title("F1 Training vs F1 Cross-Validation")
         plt.show()
-        input("Press enter to continue...")
         plt.plot(auc_train)
         plt.plot(auc_eval)
         plt.legend(["training auc", "validation auc"])
         plt.title("AUC Training vs AUC Cross-Validation")
         plt.show()
     return
+
+
+def test_predictions(dataloader, model, batch_size):
+
+    predictions = pd.read_csv(r"/home/andrewg/PycharmProjects/assignments/ProstateX-TestLesionInformation/ProstateX-Findings-Test.csv")
+    predictions.insert(4, "ClinSig", 0)
+    predictions = predictions.drop(["pos", "zone"], axis=1)
+
+    for idx, batch in enumerate(dataloader):
+        outputs = model(batch["image"])
+        start_batch = idx * batch_size
+        end_batch = start_batch + batch_size
+        predictions["ClinSig"].iloc[start_batch: end_batch] = outputs.flatten().tolist()
+
+    return predictions
 
 
 if __name__ == "__main__":
@@ -283,13 +297,13 @@ if __name__ == "__main__":
     cnn = CNN()
     cnn.cuda()
     optimizer = optim.SGD(cnn.parameters(), lr=0.001, momentum=0.9)
-    train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=30,
+    train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn, epochs=10,
                 batch_size=batch_size, optimizer=optimizer, loss_function=loss_function, show=True)
 
-    # Model 2
-    cnn2 = CNNSimple()
-    cnn2.cuda()
-    # optimizer = optim.Adam(cnn2.parameters(), lr=0.005)
-    optimizer = optim.SGD(cnn2.parameters(), lr=0.001, momentum=0.9)
-    # train_model(train_data=dataloader_train, val_data=dataloader_val, model=cnn2, epochs=30,
-    #             batch_size=batch_size, optimizer=optimizer, loss_function=loss_function, show=True)
+    test_folder = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/test/adc"
+    p_images_test = ProstateImages(modality="adc", train=False, device=device)
+
+    dataloader_test = DataLoader(p_images_test, batch_size=batch_size, shuffle=False)
+
+    predictions = test_predictions(dataloader_test, cnn, batch_size)
+    predictions.to_csv(r"/home/andrewg/PycharmProjects/assignments/predictions/preds.csv")

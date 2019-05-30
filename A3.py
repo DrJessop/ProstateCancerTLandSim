@@ -59,6 +59,7 @@ class ProstateImages(Dataset):
         if self.train:
             self.mapping = mapping
             self.map_num = 0
+
             # The 0th index may vary depending on the first key of the hash function
             self.first_index = sorted(self.mapping[self.map_num])[0]
             self.length = len(self.mapping[self.map_num])
@@ -109,66 +110,6 @@ class ProstateImages(Dataset):
         return output
 
 
-class ThreeChannelProstateImages(Dataset):
-
-    def __init__(self, train, device, length, width, height, depth):
-        self.train = train
-        self.device = device
-        self.normalize = torchvision.transforms.Normalize(mean=0, std=1)
-        self.length = length
-        self.width = width
-        self.height = height
-        self.depth = depth
-
-    def __len__(self):
-        return self.length
-
-    def __getitem__(self, index):
-        if self.train:
-            path = "{}/{}".format(
-                "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train",
-                "{}/{}_{}.nrrd"
-            )
-            try:
-                t2_path = path.format("t2", index, 0)
-                t2_image = sitk.GetArrayFromImage(sitk.ReadImage(t2_path))
-                cancer_label = 0
-            except:
-                t2_path = path.format("t2", index, 1)
-                t2_image = sitk.ReadImage(t2_path)
-                cancer_label = 1
-
-            adc_path = path.format("adc", index, cancer_label)
-            adc_image = sitk.GetArrayFromImage(sitk.ReadImage(adc_path))
-
-            bval_path = path.format("bval", index, cancer_label)
-            bval_image = sitk.GetArrayFromImage(sitk.ReadImage(bval_path))
-
-            image = np.array([t2_image, adc_image, bval_image])
-
-            # The last digit in the file name specifies cancer/non-cancer
-            output = {"image": image, "cancer": cancer_label}
-
-        else:
-            path = "{}/{}".format(
-                "/home/andrewg/PycharmProjects/assignments/resampled_cropped/test",
-                "{}/{}.nrrd"
-            )
-            t2_image = sitk.GetArrayFromImage(sitk.ReadImage(path.format("t2", index)))
-            adc_image = sitk.GetArrayFromImage(sitk.ReadImage(path.format("adc", index)))
-            bval_image = sitk.GetArrayFromImage(sitk.ReadImage(path.format("bval", index)))
-            image = np.array([t2_image, adc_image, bval_image])
-            output = {"image": image}
-
-        if output["image"].shape == (self.depth, self.height, self.width):
-            output["image"] = None
-        else:
-            output["image"] = torch.from_numpy(output["image"]).float().to(self.device)
-            output["image"] = self.normalize(output["image"])
-
-        return output
-
-
 class CNN(nn.Module):
     """
     Baseline CNN with 5 Conv layers and 2 linear layers.
@@ -210,14 +151,6 @@ class CNN(nn.Module):
         data = nn.ReLU()(data)
         data = self.dense2(data)
         data = nn.Sigmoid()(data)
-        return data
-
-
-class CNNMultiChannel(nn.Module):
-    def __init__(self):
-        pass
-
-    def forward(self, data):
         return data
 
 
@@ -312,17 +245,33 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
 
 def k_fold_cross_validation(K, train_data, val_data, epochs, loss_function, lr=0.005, momentum=0.9, weight_decay=0.06,
                             show=True):
+    """
+    Given training and validation data, performs K-fold cross-validation.
+    :param K: Number of folds
+    :param train_data: A tuple containing a ProstateImages object where train=True and a dataloader in which
+                       the ProstateImages object is supplied as a parameter
+    :param val_data: A tuple containing a ProstateImages object where train=True and a dataloader in which
+                     the ProstateImages object is supplied as a parameter
+    :param epochs: The number of epochs each model is to be trained for
+    :param loss_function: The desired loss function which is to be used by every model being trained
+    :param lr: The learning rate, default is 0.005
+    :param momentum: The momentum for stochastic gradient descent, default is 0.9
+    :param weight_decay: L2 regularization alpha parameter, default is 0.06
+    :param show: Whether or not to show the train/val loss, f1, and auc curves after each fold, default is True
+    :return: A list (size 4) of lists, where the first list contains the auc scores for the training sets, the second
+             list contains the f1 scores for the training sets, the third list contains the auc scores for the
+             validation sets, and the fourth and final list contains the f1 scores for the validation sets
+    """
     train_data, train_dataloader = train_data
     val_data, val_dataloader = val_data
     auc_train_avg, f1_train_avg, auc_eval_avg, f1_eval_avg = [], [], [], []
     models = []
-    for k in range(0,1):
+    for k in range(K):
         print("Fold {}".format(k))
         model = CNN()
         model.cuda()
         optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
         he_initialize(model)
-        # optimizer = optim.Adam(model.parameters(), lr=0.005, weight_decay=0.05)
         train_data.change_map_num(k)
         val_data.change_map_num(k)
         auc_train, f1_train, auc_eval, f1_eval = train_model(train_dataloader, val_dataloader, model, epochs, optimizer,
@@ -362,6 +311,12 @@ def test_predictions(dataloader, model):
 
 
 def he_initialize(model):
+    """
+    He weight initialization, as described in Delving Deep into Rectifiers:Surpassing Human-Level Performance on
+    ImageNet Classification (https://arxiv.org/pdf/1502.01852.pdf)
+    :param model: The network being initialized
+    :return: None
+    """
     if isinstance(model, nn.Conv2d):
         torch.nn.init.kaiming_normal_(model.weight)
         if model.bias:
@@ -429,6 +384,6 @@ if __name__ == "__main__":
     else:
         next_result = "1.csv"
 
-    # torch.save(models_and_scores[0][0].state_dict(), "{}/{}".format(model_dir, next_model))
+    torch.save(models_and_scores[0][0].state_dict(), "{}/{}".format(model_dir, next_model))
 
-    # results.to_csv("{}/{}".format(predictions_dir, next_result))
+    results.to_csv("{}/{}".format(predictions_dir, next_result))

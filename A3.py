@@ -310,7 +310,8 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     return auc_train[-1], f1_train[-1], auc_eval[-1], f1_eval[-1]
 
 
-def k_fold_cross_validation(K, train_data, val_data, epochs, loss_function, show=True):
+def k_fold_cross_validation(K, train_data, val_data, epochs, loss_function, lr=0.005, momentum=0.9, weight_decay=0.06,
+                            show=True):
     train_data, train_dataloader = train_data
     val_data, val_dataloader = val_data
     auc_train_avg, f1_train_avg, auc_eval_avg, f1_eval_avg = [], [], [], []
@@ -319,7 +320,7 @@ def k_fold_cross_validation(K, train_data, val_data, epochs, loss_function, show
         print("Fold {}".format(k))
         model = CNN()
         model.cuda()
-        optimizer = optim.SGD(model.parameters(), lr=0.005, momentum=0.9, weight_decay=0.06)
+        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
         he_initialize(model)
         # optimizer = optim.Adam(model.parameters(), lr=0.005, weight_decay=0.05)
         train_data.change_map_num(k)
@@ -380,7 +381,7 @@ if __name__ == "__main__":
 
     ngpu = 1
     device = torch.device("cuda:0" if (torch.cuda.is_available() and ngpu > 0) else "cpu")
-    modality = "bval"
+    modality = "adc"
     image_folder_contents = os.listdir("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/{}".format(
                                                                                                             modality))
     num_images = len(image_folder_contents)
@@ -404,13 +405,30 @@ if __name__ == "__main__":
     cnn.cuda()
 
     models_and_scores = k_fold_cross_validation(K=5, train_data=(p_images_train, dataloader_train),
-                                                val_data=(p_images_validation, dataloader_val), epochs=19,
-                                                loss_function=loss_function, show=True)
+                                                val_data=(p_images_validation, dataloader_val), epochs=50,
+                                                loss_function=loss_function, lr=0.008, show=True)
     p_images_test = ProstateImages(modality=modality, train=False, device=device)
     dataloader_test = DataLoader(p_images_test, batch_size=batch_size_test, shuffle=False)
 
     results = test_predictions(dataloader_test, models_and_scores[0][0])
-    torch.save(models_and_scores[0][0].state_dict(),
-               "/home/andrewg/PycharmProjects/assignments/predictions/best_model.pt")
 
-    results.to_csv("/home/andrewg/PycharmProjects/assignments/predictions/preds2.csv")
+    model_dir = "/home/andrewg/PycharmProjects/assignments/predictions/models"
+    predictions_dir = "/home/andrewg/PycharmProjects/assignments/predictions/prediction_files"
+    model_files = sorted(os.listdir(model_dir))
+    results_files = sorted(os.listdir(predictions_dir))
+
+    if model_files:
+        next_model, _ = model_files[-1].split('.')
+        next_model = "{}.pt".format(int(next_model) + 1)
+    else:
+        next_model = "1.pt"
+
+    if results_files:
+        next_result, _ = model_files[-1].split('.')
+        next_result = "{}.csv".format(int(next_result) + 1)
+    else:
+        next_result = "1.csv"
+
+    # torch.save(models_and_scores[0][0].state_dict(), "{}/{}".format(model_dir, next_model))
+
+    # results.to_csv("{}/{}".format(predictions_dir, next_result))

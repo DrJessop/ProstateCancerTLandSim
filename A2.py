@@ -7,8 +7,6 @@ from image_augmentation import rotation3d
 import shutil
 import matplotlib.pyplot as plt
 import random
-import itertools
-import copy
 import pickle as pk
 
 
@@ -40,7 +38,7 @@ def resample_image(itk_image, out_spacing, is_label=False):
     if is_label:
         resample.SetInterpolator(sitk.sitkNearestNeighbor)
     else:
-        resample.SetInterpolator(sitk.sitkBSpline)
+        resample.SetInterpolator(sitk.sitkCosineWindowedSinc)
 
     return resample.Execute(itk_image)
 
@@ -120,75 +118,6 @@ def rotated_crop(patient_images, crop_width, crop_height, crop_depth, degrees, l
 
 
 def image_cropper(findings_dataframe, resampled_images, padding,
-                  crop_width, crop_height, crop_depth, num_crops_per_image=1, train=True):
-    """
-    Given a dataframe with the findings of cancer, a list of images, and a desired width, height,
-    and depth, this function returns a set of cropped versions of the original images of dimension
-    crop_width x crop_height x crop_depth
-    :param findings_dataframe: A pandas dataframe containing the LPS coordinates of the cancer
-    :param resampled_images: A list of images that have been resampled to all have the same
-                             spacing
-    :param padding: 0-Padding in the i,j,k directions
-    :param crop_width: The desired width of a patch
-    :param crop_height: The desired height of a patch
-    :param crop_depth: The desired depth of a patch
-    :param num_crops_per_image: The number of crops desired for a given image
-    :param train: Boolean, represents whether these are crops of the training or the test set
-    :return: A list of cropped versions of the original re-sampled images
-    """
-
-    t2_resampled, adc_resampled, bval_resampled = resampled_images
-
-    if num_crops_per_image < 1:
-        print("Cannot have less than 1 crop for an image")
-        exit()
-    degrees = [5, 10, 15, 20, 25, 180]  # One of these is randomly chosen for every rotated crop
-    crops = {}
-    for _, patient in findings_dataframe.iterrows():
-        patient_id = patient["patient_id"]
-        patient_images = [t2_resampled[int(patient_id[-4:])], adc_resampled[int(patient_id[-4:])],
-                          bval_resampled[int(patient_id[-4:])]]
-        if train:
-            cancer_marker = int(patient["ClinSig"])  # 1 if cancer, else 0
-        if '' in patient_images:  # One of the images is blank
-            continue
-        else:
-            # Adds padding to each of the images
-            patient_images = [padding.Execute(p_image) for p_image in patient_images]
-            lps = [float(loc) for loc in patient["pos"].split(' ') if loc != '']
-
-            # Convert lps to ijk for each of the images
-            ijk_vals = [patient_images[idx].TransformPhysicalPointToIndex(lps) for idx in range(3)]
-
-            # Below code makes a crop of dimensions crop_width x crop_height x crop_depth
-            for crop_num in range(num_crops_per_image):
-                if crop_num == 0:  # The first crop we want to guarantee has the biopsy position exactly in the center
-                    crop = crop_from_center(patient_images, ijk_vals, crop_width, crop_height, crop_depth)
-                else:
-                    # Rotate the image, and then translate and crop
-                    crop = rotated_crop(patient_images, crop_width, crop_height, crop_depth, degrees, lps, ijk_vals)
-                sizes = [im.GetSize() for im in crop if im.GetSize() == (crop_width, crop_height, crop_depth)]
-                if len(sizes) != 3:  # If not all of the image sizes are correct
-                    print("Invalid image for patient {}".format(patient_id))
-                    break
-                if patient_id in crops.keys():
-                    if train:
-                        crops[patient_id].append((crop, cancer_marker))
-                    else:
-                        crops[patient_id].append(crop)
-                else:
-                    if train:
-                        crops[patient_id] = [(crop, cancer_marker)]
-                    else:
-                        crops[patient_id] = [crop]
-
-                # If no cancer present
-                if train and cancer_marker == 0:
-                    break
-    return crops
-
-
-def image_cropper_v2(findings_dataframe, resampled_images, padding,
                      crop_width, crop_height, crop_depth, num_crops_per_image=1, train=True):
     """
     Given a dataframe with the findings of cancer, a list of images, and a desired width, height,
@@ -299,38 +228,21 @@ def write_cropped_images(cropped_images, train=True):
             sitk.WriteImage(patient_image[0], destination.format("t2", p_id))
             sitk.WriteImage(patient_image[1], destination.format("adc", p_id))
             sitk.WriteImage(patient_image[2], destination.format("bval", p_id))
-
-
-def write_cropped_images_test(cropped_images):
-    """
-    This function writes the cropped images of modality 'modality' (ex. t2-weighted, bval, etc.)
-    to the directory resampled_cropped
-    :param cropped_images: A dictionary where the key is the patient number and the value is
-                           a list of the crops around all the relevant fiducials
-    :param train: Whether or not we are writing to the training or test set
-    :return: None
-    """
-
-    destination = r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/test/"
-
-    directory_contents = os.listdir(destination)
-    for sub_directory in directory_contents:
-        sub_directory_path = destination + sub_directory
-        shutil.rmtree(sub_directory_path)
-        os.mkdir(sub_directory_path)
-
-    destination = destination + r"{}/{}.nrrd"
-
-    patient_images = [patient_image for key in cropped_images.keys()
-                      for patient_image in cropped_images[key]]
-    for p_id in range(len(patient_images)):
-        patient_image = patient_images[p_id]
-        sitk.WriteImage(patient_image[0], destination.format("t2", p_id))
-        sitk.WriteImage(patient_image[1], destination.format("adc", p_id))
-        sitk.WriteImage(patient_image[2], destination.format("bval", p_id))
+    return
 
 
 def write_cropped_images_train_and_folds(cropped_images, num_crops, num_folds=5, fold_fraction=0.2):
+    """
+    This function writes all cropped images to a training directory (for each modality) and creates a list of hashmaps
+    for folds. These maps ensure that there is a balanced distribution of cancer and non-cancer in each validation set
+    as well as the training set used for prediction.
+    :param cropped_images: A dictionary where the keys are the patient IDs, and the values are lists where each element
+    is a list of length three (first element in that list is t2 image, and then adc and bval).
+    :param num_crops: The number of crops for a given patient's image
+    :param num_folds: The number of sets to be created
+    :param fold_fraction: The amount of cancer patients to be within a fold's validation set
+    :return: fold key and train key mappings (lists of hash functions which map to the correct patient data)
+    """
 
     destination = r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/"
 
@@ -411,6 +323,12 @@ def write_cropped_images_train_and_folds(cropped_images, num_crops, num_folds=5,
 
 
 def write_cropped_images_test(cropped_images):
+    """
+    This function writes the cropped testing images to the test folder (for each modality)
+    :param cropped_images: A dictionary, where the key is the patient number, and the value is a list of length three,
+    where the images in the list are t2, adc, and bval respectively
+    :return: None
+    """
 
     destination = r"/home/andrewg/PycharmProjects/assignments/resampled_cropped/test/"
 
@@ -513,11 +431,10 @@ if __name__ == "__main__":
 
     resampled_images = [t2, adc, bval]
 
-    """
     num_crops = 20
 
-    cropped_images_train = image_cropper_v2(findings_train, resampled_images, padding_filter, *desired_patch_dimensions,
-                                            num_crops_per_image=num_crops, train=True)
+    cropped_images_train = image_cropper(findings_train, resampled_images, padding_filter, *desired_patch_dimensions,
+                                         num_crops_per_image=num_crops, train=True)
 
     fold_key_mappings, train_key_mappings = write_cropped_images_train_and_folds(cropped_images_train,
                                                                                  num_crops=num_crops)
@@ -526,11 +443,9 @@ if __name__ == "__main__":
 
     with open("/home/andrewg/PycharmProjects/assignments/train_key_mappings.pkl", 'wb') as output:
         pk.dump(train_key_mappings, output, pk.HIGHEST_PROTOCOL)
-    
-    """
 
-    cropped_images_test = image_cropper_v2(findings_test, resampled_images, padding_filter, *desired_patch_dimensions,
-                                           num_crops_per_image=1, train=False)
+    cropped_images_test = image_cropper(findings_test, resampled_images, padding_filter, *desired_patch_dimensions,
+                                        num_crops_per_image=1, train=False)
 
     write_cropped_images_test(cropped_images_test)
 

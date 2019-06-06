@@ -166,12 +166,22 @@ def image_cropper(findings_dataframe, resampled_images, padding,
                 else:
                     # Rotate the image, and then translate and crop
                     crop = rotated_crop(patient_images, crop_width, crop_height, crop_depth, degrees, lps, ijk_vals)
-                sizes = [im.GetSize() for im in crop if im.GetSize() == (crop_width, crop_height, crop_depth)]
+                invalid_sizes = [im.GetSize() for im in crop if im.GetSize() != (crop_width, crop_height, crop_depth)]
                 if train:
-                    if len(sizes) != 3:  # If not all of the image sizes are correct
+                    if invalid_sizes:  # If not all of the image sizes are correct
                         print("Invalid image for patient {}".format(patient_id))
                         invalid_keys.add("{}_{}".format(patient_id, cancer_marker))
                         continue
+                    elif np.isnan(np.sum(sitk.GetArrayFromImage(crop[0]).flatten())):
+                        invalid_keys.add("{}_{}".format(patient_id, cancer_marker))
+                else:
+                    if invalid_sizes:  # If not all of the image sizes are correct
+                        print("Invalid image for patient {}".format(patient_id))
+                        invalid_keys.add("{}_{}".format(patient_id))
+                        continue
+                        # If any of the crops are bad, they're all bad
+                    elif np.isnan(np.sum(sitk.GetArrayFromImage(crop[0]).flatten())):
+                        invalid_keys.add("{}_{}".format(patient_id))
                 if train:
                     key = "{}_{}".format(patient_id, cancer_marker)
                 else:
@@ -361,6 +371,8 @@ def write_cropped_images_test(cropped_images):
 
 
 if __name__ == "__main__":
+    print(1)
+    input()
     patients = create_patients()
     t2 = [sitk.ReadImage(patients[patient_number]["t2"]) for patient_number in range(len(patients))]
     adc = [sitk.ReadImage(patients[patient_number]["adc"]) for patient_number in range(len(patients))]
@@ -433,17 +445,18 @@ if __name__ == "__main__":
 
     num_crops = 20
 
-    cropped_images_train = image_cropper(findings_train, resampled_images, padding_filter, *desired_patch_dimensions,
-                                         num_crops_per_image=num_crops, train=True)
+    # cropped_images_train = image_cropper(findings_train, resampled_images, padding_filter, *desired_patch_dimensions,
+    #                                      num_crops_per_image=num_crops, train=True)
 
-    fold_key_mappings, train_key_mappings = write_cropped_images_train_and_folds(cropped_images_train,
-                                                                                 num_crops=num_crops)
+    # fold_key_mappings, train_key_mappings = write_cropped_images_train_and_folds(cropped_images_train,
+    #                                                                              num_crops=num_crops)
+    """
     with open("/home/andrewg/PycharmProjects/assignments/fold_key_mappings.pkl", 'wb') as output:
         pk.dump(fold_key_mappings, output, pk.HIGHEST_PROTOCOL)
 
     with open("/home/andrewg/PycharmProjects/assignments/train_key_mappings.pkl", 'wb') as output:
         pk.dump(train_key_mappings, output, pk.HIGHEST_PROTOCOL)
-
+    """
     cropped_images_test = image_cropper(findings_test, resampled_images, padding_filter, *desired_patch_dimensions,
                                         num_crops_per_image=1, train=False)
 

@@ -1,7 +1,5 @@
 import os
 import SimpleITK as sitk
-import numpy as np
-import torchvision
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -9,9 +7,11 @@ import torch.optim as optim
 import torch.utils.data
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, f1_score, auc, roc_curve
+from sklearn.metrics import f1_score, auc, roc_curve
 import pandas as pd
 import pickle as pk
+import numpy as np
+import adabound
 
 
 def read_cropped_images(modality):
@@ -49,13 +49,14 @@ class ProstateImages(Dataset):
     This class's sole purpose is to provide the framework for fetching training/test data for the data loader which
     uses this class as a parameter
     """
+    global mean_tensor
+    global standard_deviation_tensor
 
     def __init__(self, modality, train, device, mapping=None):
         self.modality = modality
         self.train = train
         self.device = device
         self.normalize = sitk.NormalizeImageFilter()
-        self.num_images = num_images
         if self.train:
             self.mapping = mapping
             self.map_num = 0
@@ -106,7 +107,11 @@ class ProstateImages(Dataset):
 
         output["image"] = self.normalize.Execute(output["image"])
         output["image"] = sitk.GetArrayFromImage(output["image"])
+        # output["image"] = (output["image"] - mean_tensor) / standard_deviation_tensor
+        if np.isnan(output["image"][0, 0, 0]):
+            output["image"] = np.random.rand(3, 32, 32)
         output["image"] = torch.from_numpy(output["image"]).float().to(self.device)
+        output["index"] = index
         return output
 
 
@@ -131,18 +136,18 @@ class CNN(nn.Module):
         data = data.unsqueeze(1)
         data = self.conv1(data)
         data = data.squeeze(2)
-        # data = nn.BatchNorm2d(32).cuda()(data)
+        # data = nn.BatchNorm2d(32).cuda(cuda_destination)(data)
         data = nn.ReLU()(data)
         data = self.conv2(data)
-        # data = nn.BatchNorm2d(32).cuda()(data)
+        data = nn.BatchNorm2d(32).cuda(cuda_destination)(data)
         data = nn.ReLU()(data)
         data = self.max_pool1(data)
         data = self.conv3(data)
-        data = nn.BatchNorm2d(64).cuda()(data)
+        data = nn.BatchNorm2d(64).cuda(cuda_destination)(data)
         data = nn.ReLU()(data)
         data = self.conv4(data)
-        # data = nn.BatchNorm2d(64).cuda()(data)
         data = nn.ReLU()(data)
+        # data = nn.BatchNorm2d(64).cuda(cuda_destination)(data)
         data = self.max_pool2(data)
         data = self.conv5(data)
         data = nn.ReLU()(data)
@@ -151,6 +156,55 @@ class CNN(nn.Module):
         data = nn.ReLU()(data)
         data = self.dense2(data)
         data = nn.Sigmoid()(data)
+        return data
+
+
+class CNN2(nn.Module):
+    def __init__(self):
+        super(CNN2, self).__init__()
+        self.conv1 = nn.Conv3d(in_channels=1, out_channels=32, kernel_size=(2, 2, 2), stride=2, padding=1)
+        self.pool1 = nn.MaxPool3d(kernel_size=(2, 2, 2), stride=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=16, kernel_size=(2, 2), stride=1)
+        self.conv3 = nn.Conv2d(in_channels=16, out_channels=8, kernel_size=(2, 2), stride=1)
+        self.linear1 = nn.Linear(in_features=288, out_features=100)
+        self.dropout = nn.Dropout(p=0.5)
+        self.linear2 = nn.Linear(in_features=100, out_features=1)
+
+    def forward(self, data):
+        # print(data.shape)
+        data = data.unsqueeze(1)
+        # print(data.shape)
+        data = self.conv1(data)
+        data = nn.ELU()(data)
+        data = nn.ELU()(data)
+        data = nn.BatchNorm3d(32).cuda(cuda_destination)(data)
+        # print(data.shape)
+        data = self.pool1(data)
+        # print(data.shape)
+        data = data.squeeze(2)
+        # print(data.shape)
+        data = self.conv2(data)
+        data = nn.ELU()(data)
+        data = nn.ELU()(data)
+        # data = nn.BatchNorm2d(16).cuda(cuda_destination)(data)
+        # print(data.shape)
+        data = self.conv3(data)
+        data = nn.ELU()(data)
+        data = nn.ELU()(data)
+        # data = nn.BatchNorm2d(8).cuda(cuda_destination)(data)
+        # print(data.shape)
+        data = data.view(-1, 8 * 6 * 6)
+        # print(data.shape)
+        data = self.linear1(data)
+        data = nn.ELU()(data)
+        data = nn.ELU()(data)
+        # data = nn.BatchNorm1d(100).cuda(cuda_destination)(data)
+        # print(data.shape)
+        data = self.dropout(data)
+        data = self.linear2(data)
+        # print(data.shape)
+        data = nn.Sigmoid()(data)
+        # print(data.shape)
         return data
 
 
@@ -187,9 +241,11 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         all_actual = []
         for batch_num in range(num_training_batches):
             batch = next(train_iter)
-            images, class_vector = batch["image"], batch["cancer"].float().cuda().unsqueeze(1)
+            images, class_vector = batch["image"], batch["cancer"].float().cuda(cuda_destination).unsqueeze(1)
             optimizer.zero_grad()
             preds = model(images)
+            if sum(torch.isnan(preds)):
+                print(batch["index"])
             loss = loss_function(preds, class_vector)
             hard_preds = torch.round(preds)
             all_preds.extend(hard_preds.squeeze(-1).tolist())
@@ -211,7 +267,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         with torch.no_grad():
             for batch_num in range(num_val_batches):
                 batch = next(val_iter)
-                images, class_vector = batch["image"], batch["cancer"].float().cuda().unsqueeze(1)
+                images, class_vector = batch["image"], batch["cancer"].float().cuda(cuda_destination).unsqueeze(1)
                 preds = model(images)
                 loss = loss_function(preds, class_vector)
                 eval_loss += loss.item()
@@ -224,6 +280,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         fpr, tpr, _ = roc_curve(all_actual, all_preds, pos_label=1)
         auc_eval.append(auc(fpr, tpr))
         eval_errors.append(eval_loss_avg)
+
     if show:
         plt.plot(errors)
         plt.plot(eval_errors)
@@ -243,10 +300,11 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     return auc_train[-1], f1_train[-1], auc_eval[-1], f1_eval[-1]
 
 
-def k_fold_cross_validation(K, train_data, val_data, epochs, loss_function, lr=0.005, momentum=0.9, weight_decay=0.06,
-                            show=True):
+def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_function, lr=0.005, momentum=0.9,
+                            weight_decay=0.04, show=True):
     """
     Given training and validation data, performs K-fold cross-validation.
+    :param network: Instance of the class you will use as the network
     :param K: Number of folds
     :param train_data: A tuple containing a ProstateImages object where train=True and a dataloader in which
                        the ProstateImages object is supplied as a parameter
@@ -266,11 +324,13 @@ def k_fold_cross_validation(K, train_data, val_data, epochs, loss_function, lr=0
     val_data, val_dataloader = val_data
     auc_train_avg, f1_train_avg, auc_eval_avg, f1_eval_avg = [], [], [], []
     models = []
-    for k in range(K):
-        print("Fold {}".format(k))
-        model = CNN()
-        model.cuda()
-        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
+    for k in range(1):
+        print("Fold {}".format(k + 1))
+        model = network()
+        model.cuda(cuda_destination)
+        # optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
+        # optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        optimizer = adabound.AdaBound(model.parameters(), lr=lr, final_lr=lr*100, weight_decay=weight_decay)
         he_initialize(model)
         train_data.change_map_num(k)
         val_data.change_map_num(k)
@@ -285,6 +345,20 @@ def k_fold_cross_validation(K, train_data, val_data, epochs, loss_function, lr=0
     scores = [auc_train_avg, f1_train_avg, auc_eval_avg, f1_eval_avg]
     if show:
         print(scores)
+
+    with open("/home/andrewg/PycharmProjects/assignments/predictions/k_fold_statistics/stats.txt", "a") as f:
+        f.write("AUC train average\n")
+        for avg in auc_train_avg:
+            f.write(str(avg) + '\n')
+        f.write("F1 train average\n")
+        for avg in f1_train_avg:
+            f.write(str(avg) + '\n')
+        f.write("AUC eval average\n")
+        for avg in auc_eval_avg:
+            f.write(str(avg) + '\n')
+        f.write("F1 eval average\n")
+        for avg in f1_eval_avg:
+            f.write(str(avg) + '\n')
     return list(zip(models, scores))
 
 
@@ -297,13 +371,15 @@ def test_predictions(dataloader, model):
     :return: A dataframe as described above
     """
 
+    model.eval()
     predictions = pd.read_csv(r"/home/andrewg/PycharmProjects/assignments/ProstateX-TestLesionInformation/ProstateX-Findings-Test.csv")
     predictions.insert(4, "ClinSig", 0)
     predictions = predictions.drop(["pos", "zone"], axis=1)
-
     end_batch = 0
+
     for idx, batch in enumerate(dataloader):
         outputs = model(batch["image"])
+        print(outputs)
         start_batch = end_batch
         end_batch = start_batch + len(outputs)
         predictions["ClinSig"].iloc[start_batch: end_batch] = outputs.flatten().tolist()
@@ -327,24 +403,48 @@ def he_initialize(model):
             torch.nn.init.kaiming_normal_(model.bias)
 
 
+'''
+cuda_destination = 1
+testing_model = CNN()
+testing_model.cuda(1)
+device = torch.device("cuda:{}".format(1) if (torch.cuda.is_available()) else "cpu")
+testing_model.load_state_dict(torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt",
+                                         map_location=device))
+ngpu = 1
+test_set = ProstateImages(modality="bval", train=False, device=device)
+loader = DataLoader(test_set, batch_size=5, shuffle=False)
+batch = next(iter(loader))
+print(testing_model(batch["image"]))
+'''
+
 if __name__ == "__main__":
+    seed = 0
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     # Define hyper-parameters
-    batch_size_train = 200
+    cuda_destination = 1
+    batch_size_train = 100
     batch_size_val = 50
     batch_size_test = 50
-    loss_function = nn.BCELoss().cuda()
+    loss_function = nn.BCELoss().cuda(cuda_destination)
 
     ngpu = 1
-    device = torch.device("cuda:0" if (torch.cuda.is_available() and ngpu > 0) else "cpu")
-    modality = "adc"
+    device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
+    modality = "bval"
     image_folder_contents = os.listdir("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/{}".format(
                                                                                                             modality))
-    num_images = len(image_folder_contents)
 
     with open("/home/andrewg/PycharmProjects/assignments/train_key_mappings.pkl", "rb") as f:
         train_key_mappings = pk.load(f)
     with open("/home/andrewg/PycharmProjects/assignments/fold_key_mappings.pkl", "rb") as f:
         fold_key_mappings = pk.load(f)
+
+    f = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train"
+    with open("{}/{}".format(f, "{}_mean_tensor.npy".format(modality)), "rb") as g:
+        mean_tensor = np.load(g)
+    with open("{}/{}".format(f, "{}_std_tensor.npy".format(modality)), "rb") as h:
+        standard_deviation_tensor = np.load(h)
 
     p_images_train = ProstateImages(modality=modality, train=True, device=device,
                                     mapping=train_key_mappings)
@@ -355,22 +455,27 @@ if __name__ == "__main__":
     dataloader_train = DataLoader(p_images_train, batch_size=batch_size_train, shuffle=True)
     dataloader_val = DataLoader(p_images_validation, batch_size=batch_size_val)
 
-    # Model 1
-    cnn = CNN()
-    cnn.cuda()
-
-    models_and_scores = k_fold_cross_validation(K=5, train_data=(p_images_train, dataloader_train),
-                                                val_data=(p_images_validation, dataloader_val), epochs=50,
-                                                loss_function=loss_function, lr=0.008, show=True)
+    # models_and_scores = k_fold_cross_validation(CNN2, K=5, train_data=(p_images_train, dataloader_train),
+    #                                             val_data=(p_images_validation, dataloader_val), epochs=30,
+    #                                             loss_function=loss_function, lr=0.001, show=True,
+    #                                             weight_decay=0.05)
     p_images_test = ProstateImages(modality=modality, train=False, device=device)
     dataloader_test = DataLoader(p_images_test, batch_size=batch_size_test, shuffle=False)
 
-    results = test_predictions(dataloader_test, models_and_scores[0][0])
+    model = CNN()
+    model.load_state_dict(torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt",
+                                      map_location=device))
+    model.cuda(cuda_destination)
+
+    results = test_predictions(dataloader_test, model)
 
     model_dir = "/home/andrewg/PycharmProjects/assignments/predictions/models"
     predictions_dir = "/home/andrewg/PycharmProjects/assignments/predictions/prediction_files"
-    model_files = sorted(os.listdir(model_dir))
-    results_files = sorted(os.listdir(predictions_dir))
+    sort_key = lambda file_name: int(file_name.split('.')[0])
+    model_files = [f for f in os.listdir(model_dir) if f[0] in '123456789']
+    results_files = [f for f in os.listdir(predictions_dir) if f[0] in '123456789']
+    model_files = sorted(model_files, key=sort_key)
+    results_files = sorted(results_files, key=sort_key)
 
     if model_files:
         next_model, _ = model_files[-1].split('.')
@@ -379,11 +484,10 @@ if __name__ == "__main__":
         next_model = "1.pt"
 
     if results_files:
-        next_result, _ = model_files[-1].split('.')
+        next_result, _ = results_files[-1].split('.')
         next_result = "{}.csv".format(int(next_result) + 1)
     else:
         next_result = "1.csv"
 
-    torch.save(models_and_scores[0][0].state_dict(), "{}/{}".format(model_dir, next_model))
-
+    # torch.save(models_and_scores[0][0].state_dict(), "{}/{}".format(model_dir, next_model))
     results.to_csv("{}/{}".format(predictions_dir, next_result))

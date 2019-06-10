@@ -415,8 +415,6 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
             images, class_vector = batch["image"], batch["cancer"].float().cuda(model.cuda_destination).unsqueeze(1)
             optimizer.zero_grad()
             preds = model(images)
-            if sum(torch.isnan(preds)):
-                print(batch["index"])
             loss = loss_function(preds, class_vector)
             hard_preds = torch.round(preds)
             all_preds.extend(hard_preds.squeeze(-1).tolist())

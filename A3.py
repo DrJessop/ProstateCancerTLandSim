@@ -70,7 +70,7 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     # Define hyper-parameters
-    cuda_destination = 1
+    cuda_destination = 0
     batch_size_train = 100
     batch_size_val = 50
     batch_size_test = 50
@@ -102,19 +102,22 @@ if __name__ == "__main__":
     dataloader_train = DataLoader(p_images_train, batch_size=batch_size_train, shuffle=True)
     dataloader_val = DataLoader(p_images_validation, batch_size=batch_size_val)
 
-    models_and_scores = k_fold_cross_validation(CNN, K=5, train_data=(p_images_train, dataloader_train),
-                                                val_data=(p_images_validation, dataloader_val), epochs=30,
-                                                loss_function=loss_function, lr=0.001, show=True,
-                                                weight_decay=0.05)
+    # models_and_scores = k_fold_cross_validation(CNN, K=5, train_data=(p_images_train, dataloader_train),
+    #                                             val_data=(p_images_validation, dataloader_val), epochs=30,
+    #                                             loss_function=loss_function, lr=0.001, show=True,
+    #                                             weight_decay=0.05)
     p_images_test = ProstateImages(modality=modality, train=False, device=device)
     dataloader_test = DataLoader(p_images_test, batch_size=batch_size_test, shuffle=False)
 
-    model = CNN()
+    model = CNN(cuda_destination=cuda_destination)
     model.load_state_dict(torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt",
                                      map_location=device))
     model.cuda(cuda_destination)
 
+    print(model(torch.load("/home/andrewg/wtf.pt")))
+    input()
     results = test_predictions(dataloader_test, model)
+    print(results)
 
     model_dir = "/home/andrewg/PycharmProjects/assignments/predictions/models"
     predictions_dir = "/home/andrewg/PycharmProjects/assignments/predictions/prediction_files"
@@ -139,4 +142,4 @@ if __name__ == "__main__":
     # torch.save(models_and_scores[0][0].state_dict(), "{}/{}".format(model_dir, next_model))
     unsure_images_ids = results.query("0.45 <= ClinSig <= 0.55").index
     # results.ClinSig.iloc[unsure_images_ids] = results.ClinSig.iloc[unsure_images_ids].apply(lambda x: 0.3)
-    results.to_csv("{}/{}".format(predictions_dir, next_result))
+    # results.to_csv("{}/{}".format(predictions_dir, next_result))

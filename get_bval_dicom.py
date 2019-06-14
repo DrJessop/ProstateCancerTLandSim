@@ -31,7 +31,6 @@ for mri_image in kgh_data_contents:
                     shutil.copyfileobj(source_fid, target_fid)
             source_fid.close()
 
-    # All relevant folders have the prefix 's'
     mri_image_contents = [sub_folder for sub_folder in mri_image_contents
                           if os.path.isdir("{}/{}".format(mri_image_dir, sub_folder))]
     if mri_image_contents[0][0] == 'e':
@@ -52,12 +51,28 @@ for mri_image in kgh_data_contents:
             target = "{}/{}".format(destination, target_folder)
 
             # Skips the header and non-dicom files, sentinel None used in case no MRDC file in directory
-            sample_file = next((d_file for d_file in os.listdir(source) if "MRDC" in d_file), None)
-            if sample_file:
-                meta_data = pydicom.read_file("{}/{}".format(source, sample_file)).ProtocolName
-                if "DIFF B" in meta_data:
-                    os.mkdir(target)
-                    dicom_reader = reader.GetGDCMSeriesFileNames(source)
-                    reader.SetFileNames(dicom_reader)
-                    dicoms = reader.Execute()
-                    sitk.WriteImage(dicoms, "{}/{}.nrrd".format(target, meta_data))
+            dicom_files = [f for f in os.listdir(source) if "MRDC" in f]
+            bval_dicom_dict = dict()
+            max_bval = 0
+            bval_dicom_dict[max_bval] = list()
+            for dicom_file in dicom_files:
+                file_name = "{}/{}".format(source, dicom_file)
+                metadata = pydicom.read_file(file_name)
+                series_description = metadata.SeriesDescription
+                if "DIFF B" in series_description and "ADC" not in series_description:
+                    file_bval = int(metadata.SequenceName.split('b')[1].split('t')[0])
+                    if file_bval > max_bval:
+                        max_bval = file_bval
+                        bval_dicom_dict[max_bval] = list()
+                    if file_bval == max_bval:
+                        bval_dicom_dict[max_bval].append((file_name.rsplit('/', 1)[1], metadata))
+
+            if bval_dicom_dict[max_bval]:
+                os.system("mkdir {}".format(target))
+                for dicom_file, metadata in bval_dicom_dict[max_bval]:
+                    file_location = "{}/{}".format(target, dicom_file)
+                    pydicom.write_file(file_location, metadata)
+                dicom_reader = reader.GetGDCMSeriesFileNames(target)
+                reader.SetFileNames(dicom_reader)
+                nrrd = reader.Execute()
+                sitk.WriteImage(nrrd, "{}/{}.nrrd".format(destination, mri_image))

@@ -10,6 +10,8 @@ from sklearn.metrics import f1_score, auc, roc_curve
 import random
 from image_augmentation import rotation3d
 import shutil
+import pandas as pd
+import pickle as pk
 
 
 def resample_image(itk_image, out_spacing, is_label=False):
@@ -530,3 +532,41 @@ def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_funct
         for avg in f1_eval_avg:
             f.write(str(avg) + '\n')
     return list(zip(models, scores))
+
+
+def prepare_kgh_data(cuda_destination, device):
+    kgh_labels_file = "/home/andrewg/PycharmProjects/assignments/data/KGHData/kgh.csv"
+    cancer_labels = pd.read_csv(kgh_labels_file)[["anonymized", "Total Gleason Xypeguide"]]
+    cancer_labels = cancer_labels.drop([7, 9, 14, 18, 35])
+    for idx, val in cancer_labels["Total Gleason Xypeguide"].iteritems():
+        if val == '0':
+            cancer_labels["Total Gleason Xypeguide"][idx] = 0
+        elif str(val) in '123456789':
+            cancer_labels["Total Gleason Xypeguide"][idx] = 1
+    valid = set(cancer_labels[cancer_labels["Total Gleason Xypeguide"] == 0].index)
+    valid.update(cancer_labels[cancer_labels["Total Gleason Xypeguide"] == 1].index)
+    cancer_labels = cancer_labels.loc[valid]
+    image_path = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh"
+    image_dir = set(os.listdir(image_path))
+    ROIs = ["tz", "pz", "tx", "b_tz"]
+
+    ids = cancer_labels["anonymized"]
+    targets = torch.from_numpy(np.asarray(cancer_labels["Total Gleason Xypeguide"], np.float64))
+    tensor = torch.zeros(len(targets), 3, 32, 32)
+    normalize = sitk.NormalizeImageFilter()
+    bad_indices = []
+    for idx, pcad_id in enumerate(ids):
+        for roi in ROIs:
+            image_name = "{}_{}.nrrd".format(pcad_id, roi)
+            if image_name in image_dir:
+                image = normalize.Execute(sitk.ReadImage("{}/{}".format(image_path, image_name)))
+                image = torch.from_numpy(sitk.GetArrayFromImage(image)).float().to(device)
+                tensor[idx] = image
+                break
+            if roi == "b_tz":
+                bad_indices.append(idx)
+    tensor = tensor.float().cuda(cuda_destination)
+    torch.save(tensor, "/home/andrewg/PycharmProjects/assignments/kgh_data_tensor.pt")
+    torch.save(targets, "/home/andrewg/PycharmProjects/assignments/kgh_target_tensor.pt")
+    with open("/home/andrewg/PycharmProjects/assignments/bad_indices.pkl", "wb") as f:
+        pk.dump(bad_indices, f)

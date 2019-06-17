@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import os
 import SimpleITK as sitk
 import numpy as np
@@ -395,7 +395,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     :param num_folds: How many folds were chosen to be
     :param show: Whether or not the user wants to see plots of loss, f1, and auc scores for the training and validation
                  sets
-    :return: None
+    :return: AUC and F1 train, AUC and F1 validation
     """
 
     errors = []
@@ -535,9 +535,15 @@ def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_funct
 
 
 def prepare_kgh_data(cuda_destination, device):
+    """
+    This function reads in data from the KGH folder and produces tensors for the data and the corresponding labels
+    :param cuda_destination: 0 or 1 (gpu name)
+    :param device: Which gpu is being used
+    :return: None
+    """
     kgh_labels_file = "/home/andrewg/PycharmProjects/assignments/data/KGHData/kgh.csv"
     cancer_labels = pd.read_csv(kgh_labels_file)[["anonymized", "Total Gleason Xypeguide"]]
-    cancer_labels = cancer_labels.drop([7, 9, 14, 18, 35])
+    cancer_labels = cancer_labels.drop([0, 7, 9, 14, 18, 22, 35, 71, 73])
     for idx, val in cancer_labels["Total Gleason Xypeguide"].iteritems():
         if val == '0':
             cancer_labels["Total Gleason Xypeguide"][idx] = 0
@@ -570,3 +576,39 @@ def prepare_kgh_data(cuda_destination, device):
     torch.save(targets, "/home/andrewg/PycharmProjects/assignments/kgh_target_tensor.pt")
     with open("/home/andrewg/PycharmProjects/assignments/bad_indices.pkl", "wb") as f:
         pk.dump(bad_indices, f)
+
+
+def create_bval_kgh_patients(num_crops):
+    """
+    This function produces a dictionary of cropped images from the KGH data
+    :return: A dictionary where the keys are the patient numbers and the values are the cropped images
+    """
+    kgh_data_dir = "/home/andrewg/PycharmProjects/assignments/data/KGHData"
+    directories = os.listdir(kgh_data_dir)
+    bval = dict()
+    for directory in directories:
+        sub_directory = "{}/{}".format(kgh_data_dir, directory)
+        if not(os.path.isdir(sub_directory)):
+            continue
+        sub_directory_contents = os.listdir(sub_directory)
+        for file in sub_directory_contents:
+            if "nrrd" in file:
+                bval_nrrd_file = file  # file becomes the nrrd file name at this point
+                break
+        else:
+            continue  # if the for loop never runs
+        bval_nrrd_file = "{}/{}".format(sub_directory, bval_nrrd_file)
+        try:
+            with open("{}/fiducials/{}".format(kgh_data_dir, directory)) as fid_file:
+                bval[directory] = resample_image(sitk.ReadImage(bval_nrrd_file), out_spacing=(2, 2, 3))
+                for idx, line in enumerate(fid_file):
+                    if idx == 3:
+                        fiducial = list(map(float, line.split(',')[1:4]))
+                        fiducial[0] *= -1
+                        fiducial[1] *= -1
+                        fiducial = bval[directory].TransformPhysicalPointToIndex(fiducial)
+                        bval[directory] = crop_from_center([bval[directory]], [fiducial], 32, 32, 3)[0]
+        except:
+            pass
+
+    return bval

@@ -18,14 +18,14 @@ if __name__ == "__main__":
     device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
 
     model = CNN(cuda_destination=cuda_destination)
-    model.load_state_dict(torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt",
-                                     map_location=device))
+    model.load_state_dict(torch.load(
+        "/home/andrewg/PycharmProjects/assignments/predictions/retrained_models/retrained.pt",
+        map_location=device))
 
     tensor = "kgh_data_tensor.pt"
     targets = "kgh_target_tensor.pt"
     bad_indices = "bad_indices.pkl"
-    if not({tensor, targets, bad_indices}.issubset(os.listdir("/home/andrewg/PycharmProjects/assignments"))):
-        prepare_kgh_data(cuda_destination, device)
+    prepare_kgh_data(cuda_destination, device)
     tensor = torch.load("/home/andrewg/PycharmProjects/assignments/kgh_data_tensor.pt")
     targets = torch.load("/home/andrewg/PycharmProjects/assignments/kgh_target_tensor.pt")
     with open("/home/andrewg/PycharmProjects/assignments/bad_indices.pkl", "rb") as f:

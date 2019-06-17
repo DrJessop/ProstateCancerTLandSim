@@ -90,7 +90,8 @@ def crop_from_center(images, ijk_coordinates, width, height, depth, i_offset=0, 
 
 def rotated_crop(patient_images, crop_width, crop_height, crop_depth, degrees, lps, ijk_values, show_result=False):
     """
-    This is a helper function for image_cropper, and it returns a crop around a rotated image
+    This is a helper function for image_cropper. It rotates and translates the given images, and then crops them
+    from the center.
     :param patient_image: The sitk image that is to be cropped
     :param crop_width: The desired width of the crop
     :param crop_height: The desired height of the crop
@@ -381,6 +382,26 @@ def he_initialize(model):
             torch.nn.init.kaiming_normal_(model.bias)
 
 
+def flatten_batch(image_shape, images, class_vector, cuda_destination):
+    """
+    For example, if you have shape [batch_size, num_images_per_patient, width, height, length], then
+    this makes duplicates such that if a patient has cancer, instead of having 1 cancer label, they
+    have num_images_per_patient cancer labels
+    ex. if num_images_per_patient = 3, and class_vector is [1,1,0], this then becomes
+    [1,1,1, 1,1,1, 0,0,0]
+    :param image_shape: The total shape of the batch
+    :param images: Batches of images with one extra dimension
+    :param class_vector: Cancer label vector
+    :param cuda_destination: The gpu that the model is using
+    :return: The flattened images and the lengthened class vector
+    """
+
+    class_vector = torch.tensor([class_vector[idx].tolist() * image_shape[1] for idx in
+                                 range(image_shape[0])]).float().cuda(cuda_destination).unsqueeze(1)
+    class_vector = class_vector.view(-1).unsqueeze(1)
+    images = images.view(images.shape[0] * images.shape[1], *images.shape[2:])
+    return images, class_vector
+
 def train_model(train_data, val_data, model, epochs, optimizer, loss_function, show=False):
     """
     This function trains a model with batches of a given size, and if show=True, plots the loss, f1, and auc scores for
@@ -415,6 +436,10 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         for batch_num in range(num_training_batches):
             batch = next(train_iter)
             images, class_vector = batch["image"], batch["cancer"].float().cuda(model.cuda_destination).unsqueeze(1)
+            image_shape = images.shape
+            if len(image_shape) != 4:
+                images, class_vector = flatten_batch(image_shape, images, class_vector, model.cuda_destination)
+
             optimizer.zero_grad()
             preds = model(images)
             loss = loss_function(preds, class_vector)
@@ -439,6 +464,9 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
             for batch_num in range(num_val_batches):
                 batch = next(val_iter)
                 images, class_vector = batch["image"], batch["cancer"].float().cuda(model.cuda_destination).unsqueeze(1)
+                image_shape = images.shape
+                if len(image_shape) != 4:
+                    images, class_vector = flatten_batch(image_shape, images, class_vector, model.cuda_destination)
                 preds = model(images)
                 loss = loss_function(preds, class_vector)
                 eval_loss += loss.item()
@@ -534,6 +562,7 @@ def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_funct
     return list(zip(models, scores))
 
 
+'''
 def prepare_kgh_data(cuda_destination, device):
     """
     This function reads in data from the KGH folder and produces tensors for the data and the corresponding labels
@@ -576,16 +605,20 @@ def prepare_kgh_data(cuda_destination, device):
     torch.save(targets, "/home/andrewg/PycharmProjects/assignments/kgh_target_tensor.pt")
     with open("/home/andrewg/PycharmProjects/assignments/bad_indices.pkl", "wb") as f:
         pk.dump(bad_indices, f)
+'''
 
 
-def create_bval_kgh_patients(num_crops):
+def create_bval_kgh_patients(num_crops, crop_dim):
     """
     This function produces a dictionary of cropped images from the KGH data
+    :param num_crops: The desired number of crops for a given image
+    :param crop_dim: The desired dimensions of a crop given as a tuple (width x height x depth)
     :return: A dictionary where the keys are the patient numbers and the values are the cropped images
     """
     kgh_data_dir = "/home/andrewg/PycharmProjects/assignments/data/KGHData"
     directories = os.listdir(kgh_data_dir)
     bval = dict()
+    degrees = [5, 10, 15, 20, 25, 180]
     for directory in directories:
         sub_directory = "{}/{}".format(kgh_data_dir, directory)
         if not(os.path.isdir(sub_directory)):
@@ -600,15 +633,60 @@ def create_bval_kgh_patients(num_crops):
         bval_nrrd_file = "{}/{}".format(sub_directory, bval_nrrd_file)
         try:
             with open("{}/fiducials/{}".format(kgh_data_dir, directory)) as fid_file:
-                bval[directory] = resample_image(sitk.ReadImage(bval_nrrd_file), out_spacing=(2, 2, 3))
+                bval[directory] = [resample_image(sitk.ReadImage(bval_nrrd_file), out_spacing=(2, 2, 3))]
                 for idx, line in enumerate(fid_file):
                     if idx == 3:
                         fiducial = list(map(float, line.split(',')[1:4]))
                         fiducial[0] *= -1
                         fiducial[1] *= -1
-                        fiducial = bval[directory].TransformPhysicalPointToIndex(fiducial)
-                        bval[directory] = crop_from_center([bval[directory]], [fiducial], 32, 32, 3)[0]
+                        ijk = bval[directory][0].TransformPhysicalPointToIndex(fiducial)
+
+                        for crop_num in range(num_crops):
+                            rotated_image = rotated_crop(bval[directory][0:1], *crop_dim, degrees, fiducial, [ijk])[0]
+                            bval[directory].append(rotated_image)
+            bval[directory] = bval[directory][1:]
         except:
-            pass
+            print(directory)
 
     return bval
+
+
+class KGHProstateImages(Dataset):
+    def __init__(self, device):
+        self.dir = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh"
+        self.folders = os.listdir(self.dir)
+        self.length = len(self.folders)
+        kgh_labels_file = "/home/andrewg/PycharmProjects/assignments/data/KGHData/kgh.csv"
+        cancer_labels = pd.read_csv(kgh_labels_file)[["anonymized", "Total Gleason Xypeguide"]]
+        cancer_labels = cancer_labels.drop([0, 7, 9, 14, 18, 22, 35, 71, 73])
+        for idx, val in cancer_labels["Total Gleason Xypeguide"].iteritems():
+            if val == '0':
+                cancer_labels["Total Gleason Xypeguide"][idx] = 0
+            elif str(val) in '123456789':
+                cancer_labels["Total Gleason Xypeguide"][idx] = 1
+            else:
+                cancer_labels["Total Gleason Xypeguide"][idx] = 0
+        valid = set(cancer_labels[cancer_labels["Total Gleason Xypeguide"] == 0].index)
+        valid.update(cancer_labels[cancer_labels["Total Gleason Xypeguide"] == 1].index)
+        self.csv = cancer_labels.loc[valid]
+        self.normalize = sitk.NormalizeImageFilter()
+        self.device = device
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        patient_id = self.folders[idx]
+        image_dir = "{}/{}".format(self.dir, patient_id)
+        images = os.listdir(image_dir)
+        image_tensor = torch.from_numpy(np.asarray([sitk.GetArrayFromImage(
+                       self.normalize.Execute(sitk.ReadImage("{}/{}".format(image_dir, image)))
+                       ) for image in images])).float().to(self.device)
+        cancer_label = self.csv.loc[self.csv.anonymized == '_'.join(patient_id.split('_')[:2])]
+        try:
+            cancer_label = int(cancer_label["Total Gleason Xypeguide"])
+        except:
+            print(patient_id)
+        return {"image": image_tensor, "cancer": cancer_label}
+
+

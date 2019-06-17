@@ -70,7 +70,7 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     # Define hyper-parameters
-    cuda_destination = 0
+    cuda_destination = 1
     batch_size_train = 100
     batch_size_val = 50
     batch_size_test = 50
@@ -102,10 +102,10 @@ if __name__ == "__main__":
     dataloader_train = DataLoader(p_images_train, batch_size=batch_size_train, shuffle=True)
     dataloader_val = DataLoader(p_images_validation, batch_size=batch_size_val)
 
-    # models_and_scores = k_fold_cross_validation(CNN, K=5, train_data=(p_images_train, dataloader_train),
-    #                                             val_data=(p_images_validation, dataloader_val), epochs=30,
-    #                                             loss_function=loss_function, lr=0.001, show=True,
-    #                                             weight_decay=0.05)
+    models_and_scores = k_fold_cross_validation(CNN, K=5, train_data=(p_images_train, dataloader_train),
+                                                val_data=(p_images_validation, dataloader_val), epochs=30,
+                                                loss_function=loss_function, lr=0.001, show=True,
+                                                weight_decay=0.05)
     p_images_test = ProstateImages(modality=modality, train=False, device=device)
     dataloader_test = DataLoader(p_images_test, batch_size=batch_size_test, shuffle=False)
 

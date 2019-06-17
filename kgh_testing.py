@@ -1,10 +1,6 @@
-import pandas as pd
-import torch
 import torch.utils.data
 from models import CNN
-import os
 from sklearn.metrics import auc, roc_curve
-from data_helpers import prepare_kgh_data
 import pickle as pk
 
 
@@ -25,7 +21,7 @@ if __name__ == "__main__":
     tensor = "kgh_data_tensor.pt"
     targets = "kgh_target_tensor.pt"
     bad_indices = "bad_indices.pkl"
-    prepare_kgh_data(cuda_destination, device)
+    # prepare_kgh_data(cuda_destination, device)
     tensor = torch.load("/home/andrewg/PycharmProjects/assignments/kgh_data_tensor.pt")
     targets = torch.load("/home/andrewg/PycharmProjects/assignments/kgh_target_tensor.pt")
     with open("/home/andrewg/PycharmProjects/assignments/bad_indices.pkl", "rb") as f:

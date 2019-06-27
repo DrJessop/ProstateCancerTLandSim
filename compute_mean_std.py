@@ -15,7 +15,7 @@ for modality in ["t2", "adc", "bval"]:
         image = sitk.GetArrayFromImage(sitk.ReadImage("{}/{}".format(train_dir, image_file)))
         mean_tensor = mean_tensor + image
 
-    mean_tensor = mean_tensor / len(train_directory_contents)
+    mean_tensor = sum(mean_tensor.flatten()) / (len(train_directory_contents) * 3 * 32 * 32)
 
     standard_deviation_tensor = np.zeros((3, 32, 32))
 
@@ -23,7 +23,7 @@ for modality in ["t2", "adc", "bval"]:
         image = sitk.GetArrayFromImage(sitk.ReadImage("{}/{}".format(train_dir, image_file)))
         standard_deviation_tensor = standard_deviation_tensor + np.square(image - mean_tensor)
 
-    standard_deviation_tensor = np.sqrt(standard_deviation_tensor / len(train_directory_contents))
+    standard_deviation_tensor = sum(standard_deviation_tensor.flatten()) / (len(train_directory_contents) * 3 * 32 * 32)
 
     np.save("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/{}_mean_tensor".format(modality),
             mean_tensor)

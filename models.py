@@ -1,4 +1,22 @@
 import torch.nn as nn
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+def image_visualize(data, feature_maps):
+
+    data = data.squeeze(0).cpu().detach().numpy()
+    grid_length = 6
+    grid_height = int(np.ceil(feature_maps / grid_length))
+    grid_plot, _ = plt.subplots(grid_height, grid_length)
+
+    last_n_to_remove = grid_length * grid_height - feature_maps
+    for del_idx in range(last_n_to_remove):
+        grid_plot.delaxes(grid_plot.axes.pop())
+    for feature_map in range(feature_maps):
+        grid_plot.axes[feature_map].imshow(data[feature_map])
+        grid_plot.axes[feature_map].axis("off")
+    plt.show()
 
 
 class CNN(nn.Module):
@@ -17,23 +35,42 @@ class CNN(nn.Module):
 
         self.cuda_destination = cuda_destination
 
-    def forward(self, data):
+    def forward(self, data, show_data=None):
+        if show_data == 0:
+            plt.imshow(data.squeeze(0).cpu().detach().numpy()[1])
+            plt.show()
         data = data.unsqueeze(1)
         data = self.conv1(data)
         data = data.squeeze(2)
         data = nn.ReLU()(data)
+        if show_data == 1:
+            image_visualize(data, self.conv1.out_channels)
         data = self.conv2(data)
         data = nn.BatchNorm2d(32).cuda(self.cuda_destination)(data)
         data = nn.ReLU()(data)
+        if show_data == 2:
+            image_visualize(data, self.conv2.out_channels)
         data = self.max_pool1(data)
+        if show_data == 3:
+            num_feature_maps, _, _ = data.squeeze(0).cpu().detach().numpy()
+            image_visualize(data, num_feature_maps)
         data = self.conv3(data)
         data = nn.BatchNorm2d(64).cuda(self.cuda_destination)(data)
         data = nn.ReLU()(data)
+        if show_data == 4:
+            image_visualize(data, self.conv3.out_channels)
         data = self.conv4(data)
         data = nn.ReLU()(data)
+        if show_data == 5:
+            image_visualize(data, self.conv4.out_channels)
         data = self.max_pool2(data)
+        if show_data == 6:
+            num_feature_maps, _, _ = data.squeeze(0).cpu().detach().numpy()
+            image_visualize(data, num_feature_maps)
         data = self.conv5(data)
         data = nn.ReLU()(data)
+        if show_data == 7:
+            image_visualize(data, self.conv5.out_channels)
         data = data.view(-1, 4 * 4 * 64)
         data = self.dense1(data)
         data = nn.ReLU()(data)

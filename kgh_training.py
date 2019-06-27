@@ -1,35 +1,49 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
-from models import CNN
-from data_helpers import train_model, KGHProstateImages
+from models import CNN, CNN2
+from data_helpers import train_model, KGHProstateImages, change_requires_grad
 from adabound import AdaBound
 
 
 if __name__ == "__main__":
 
+    seed = 0
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(0)
+
     cuda_destination = 0
-    model = CNN(cuda_destination)
-    model.cuda(cuda_destination)
     ngpu = 1
     device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
-    # model.load_state_dict(torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt",
-    #                                  map_location=device))
-    num_epochs = 40
 
+    # Prepare the data
     data = KGHProstateImages(device=device)
-    num_train = int(0.2 * len(data))
+    num_train = int(0.8 * len(data))
     num_val = len(data) - num_train
     training_data, testing_data = torch.utils.data.random_split(data, (num_train, num_val))
+    train_loader = DataLoader(training_data, batch_size=10, shuffle=True)
+    test_loader = DataLoader(testing_data, batch_size=10)
 
-    train_loader = DataLoader(training_data, batch_size=10)
-    test_loader = DataLoader(testing_data, batch_size=20)
-
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.00001, momentum=0.9, weight_decay=0.05)
+    # Hyper-parameters
+    num_layers = 9
     lr = 0.00001
-    optimizer = AdaBound(model.parameters(), lr=lr, final_lr=lr*1000, weight_decay=0.05)
-    loss_function = nn.BCELoss().cuda(cuda_destination)
-    train_model(train_loader, test_loader, model, num_epochs, optimizer, loss_function, show=True)
+    final_lr = lr * 100
+    weight_decay = 0.06
+    num_epochs = 120
 
-    # torch.save(model.state_dict(),
-    #            "/home/andrewg/PycharmProjects/assignments/predictions/retrained_models/retrained.pt")
+    for num_layers_to_freeze in range(6, num_layers):
+        print("{} layers frozen".format(num_layers_to_freeze))
+        model = CNN(cuda_destination)
+        model.cuda(cuda_destination)
+        model.load_state_dict(torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt",
+                                         map_location=device))
+        for child_num in range(-1, -1 * (num_layers - num_layers_to_freeze + 1), -1):
+            print("Reinitialized layer {}".format(num_layers + child_num + 1))
+            nn.init.kaiming_normal_(list(model.children())[child_num].weight)
+        change_requires_grad(model, num_layers_to_freeze, False)
+
+        optimizer = AdaBound(model.parameters(), lr=lr, final_lr=final_lr, weight_decay=weight_decay)
+        # optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
+        loss_function = nn.BCELoss().cuda(cuda_destination)
+        train_model(train_loader, test_loader, model, num_epochs, optimizer, loss_function, show=True)

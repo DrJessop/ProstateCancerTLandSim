@@ -6,12 +6,11 @@ import SimpleITK as sitk
 import numpy as np
 import adabound
 import matplotlib.pyplot as plt
-from sklearn.metrics import f1_score, auc, roc_curve
+from sklearn.metrics import f1_score, auc, roc_curve, roc_auc_score
 import random
 from image_augmentation import rotation3d
 import shutil
 import pandas as pd
-import pickle as pk
 
 
 def resample_image(itk_image, out_spacing, is_label=False):
@@ -236,7 +235,8 @@ def image_cropper(findings_dataframe, resampled_images, padding,
     if num_crops_per_image < 1:
         print("Cannot have less than 1 crop for an image")
         exit()
-    degrees = [5, 10, 15, 20, 25, 180]  # One of these is randomly chosen for every rotated crop
+    degrees = [5, 10, 15, 20, 25]  # One of these is randomly chosen for every rotated crop
+    degrees = [-degree for degree in degrees] + degrees
     crops = {}
     invalid_keys = set()
     for _, patient in findings_dataframe.iterrows():
@@ -303,11 +303,28 @@ class ProstateImages(Dataset):
     uses this class as a parameter
     """
 
-    def __init__(self, modality, train, device, mapping=None):
+    def __init__(self, modality, train, device, normalize_strategy=1, mapping=None):
+        assert modality in ["t2", "bval", "adc"]
+        assert normalize_strategy in [1, 2]
         self.modality = modality
         self.train = train
         self.device = device
-        self.normalize = sitk.NormalizeImageFilter()
+        self.normalize_strategy = normalize_strategy
+        if self.normalize_strategy == 1:
+            self.normalize = sitk.NormalizeImageFilter()
+        else:
+            if self.modality == "adc":
+                mean_path = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/adc_mean_tensor.npy"
+                std_path = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/adc_std_tensor.npy"
+            elif self.modality == "bval":
+                mean_path = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/bval_mean_tensor.npy"
+                std_path = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/bval_std_tensor.npy"
+            else:
+                mean_path = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/t2_mean_tensor.npy"
+                std_path = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/t2_std_tensor.npy"
+            self.mean_tensor = np.load(mean_path)
+            self.std_tensor = np.load(std_path)
+
         if self.train:
             self.mapping = mapping
             self.map_num = 0
@@ -356,8 +373,14 @@ class ProstateImages(Dataset):
             image = sitk.ReadImage(path)
             output = {"image": image}
 
-        output["image"] = self.normalize.Execute(output["image"])
+        if self.normalize_strategy == 1:
+            output["image"] = self.normalize.Execute(output["image"])
         output["image"] = sitk.GetArrayFromImage(output["image"])
+
+        if self.normalize_strategy == 2:
+            output["image"] = (output["image"] - self.mean_tensor) / self.std_tensor
+
+        # Completely black or white images have no standard deviation, results in nan
         if np.isnan(output["image"][0, 0, 0]):
             output["image"] = np.random.rand(3, 32, 32)
         output["image"] = torch.from_numpy(output["image"]).float().to(self.device)
@@ -402,6 +425,7 @@ def flatten_batch(image_shape, images, class_vector, cuda_destination):
     images = images.view(images.shape[0] * images.shape[1], *images.shape[2:])
     return images, class_vector
 
+
 def train_model(train_data, val_data, model, epochs, optimizer, loss_function, show=False):
     """
     This function trains a model with batches of a given size, and if show=True, plots the loss, f1, and auc scores for
@@ -427,7 +451,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     auc_eval = []
     num_training_batches = len(train_data)
     for epoch in range(epochs):
-        model.train()
+        model.train()  # Training mode
         train_iter = iter(train_data)
         model.zero_grad()
         train_loss = 0
@@ -454,7 +478,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         fpr, tpr, _ = roc_curve(all_actual, all_preds, pos_label=1)
         auc_train.append(auc(fpr, tpr))
         errors.append(train_loss_avg)
-        model.eval()
+        model.eval()  # Evaluation mode
         num_val_batches = len(val_data)
         val_iter = iter(val_data)
         eval_loss = 0
@@ -499,8 +523,8 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     return auc_train[-1], f1_train[-1], auc_eval[-1], f1_eval[-1]
 
 
-def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_function, lr=0.005, momentum=0.9,
-                            weight_decay=0.04, show=True, cuda_destination=1):
+def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_function, lr=0.005, final_lr=0.05,
+                            momentum=0.9, weight_decay=0.04, show=True, cuda_destination=1):
     """
     Given training and validation data, performs K-fold cross-validation.
     :param network: Instance of the class you will use as the network
@@ -524,13 +548,13 @@ def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_funct
     val_data, val_dataloader = val_data
     auc_train_avg, f1_train_avg, auc_eval_avg, f1_eval_avg = [], [], [], []
     models = []
-    for k in range(1):
+    for k in range(K):
         print("Fold {}".format(k + 1))
         model = network(cuda_destination)
         model.cuda(model.cuda_destination)
         # optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
         # optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-        optimizer = adabound.AdaBound(model.parameters(), lr=lr, final_lr=lr*100, weight_decay=weight_decay)
+        optimizer = adabound.AdaBound(model.parameters(), lr=lr, final_lr=final_lr, weight_decay=weight_decay)
         he_initialize(model)
         train_data.change_map_num(k)
         val_data.change_map_num(k)
@@ -562,52 +586,6 @@ def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_funct
     return list(zip(models, scores))
 
 
-'''
-def prepare_kgh_data(cuda_destination, device):
-    """
-    This function reads in data from the KGH folder and produces tensors for the data and the corresponding labels
-    :param cuda_destination: 0 or 1 (gpu name)
-    :param device: Which gpu is being used
-    :return: None
-    """
-    kgh_labels_file = "/home/andrewg/PycharmProjects/assignments/data/KGHData/kgh.csv"
-    cancer_labels = pd.read_csv(kgh_labels_file)[["anonymized", "Total Gleason Xypeguide"]]
-    cancer_labels = cancer_labels.drop([0, 7, 9, 14, 18, 22, 35, 71, 73])
-    for idx, val in cancer_labels["Total Gleason Xypeguide"].iteritems():
-        if val == '0':
-            cancer_labels["Total Gleason Xypeguide"][idx] = 0
-        elif str(val) in '123456789':
-            cancer_labels["Total Gleason Xypeguide"][idx] = 1
-    valid = set(cancer_labels[cancer_labels["Total Gleason Xypeguide"] == 0].index)
-    valid.update(cancer_labels[cancer_labels["Total Gleason Xypeguide"] == 1].index)
-    cancer_labels = cancer_labels.loc[valid]
-    image_path = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh"
-    image_dir = set(os.listdir(image_path))
-    ROIs = ["tz", "pz", "tx", "b_tz"]
-
-    ids = cancer_labels["anonymized"]
-    targets = torch.from_numpy(np.asarray(cancer_labels["Total Gleason Xypeguide"], np.float64))
-    tensor = torch.zeros(len(targets), 3, 32, 32)
-    normalize = sitk.NormalizeImageFilter()
-    bad_indices = []
-    for idx, pcad_id in enumerate(ids):
-        for roi in ROIs:
-            image_name = "{}_{}.nrrd".format(pcad_id, roi)
-            if image_name in image_dir:
-                image = normalize.Execute(sitk.ReadImage("{}/{}".format(image_path, image_name)))
-                image = torch.from_numpy(sitk.GetArrayFromImage(image)).float().to(device)
-                tensor[idx] = image
-                break
-            if roi == "b_tz":
-                bad_indices.append(idx)
-    tensor = tensor.float().cuda(cuda_destination)
-    torch.save(tensor, "/home/andrewg/PycharmProjects/assignments/kgh_data_tensor.pt")
-    torch.save(targets, "/home/andrewg/PycharmProjects/assignments/kgh_target_tensor.pt")
-    with open("/home/andrewg/PycharmProjects/assignments/bad_indices.pkl", "wb") as f:
-        pk.dump(bad_indices, f)
-'''
-
-
 def create_bval_kgh_patients(num_crops, crop_dim):
     """
     This function produces a dictionary of cropped images from the KGH data
@@ -618,7 +596,8 @@ def create_bval_kgh_patients(num_crops, crop_dim):
     kgh_data_dir = "/home/andrewg/PycharmProjects/assignments/data/KGHData"
     directories = os.listdir(kgh_data_dir)
     bval = dict()
-    degrees = [5, 10, 15, 20, 25, 180]
+    degrees = [5, 10, 15, 20, 25]
+    # degrees = [-degree for degree in degrees] + degrees
     for directory in directories:
         sub_directory = "{}/{}".format(kgh_data_dir, directory)
         if not(os.path.isdir(sub_directory)):
@@ -637,17 +616,17 @@ def create_bval_kgh_patients(num_crops, crop_dim):
                 for idx, line in enumerate(fid_file):
                     if idx == 3:
                         fiducial = list(map(float, line.split(',')[1:4]))
-                        fiducial[0] *= -1
-                        fiducial[1] *= -1
+                        fiducial[0], fiducial[1] = -fiducial[0], -fiducial[1]
                         ijk = bval[directory][0].TransformPhysicalPointToIndex(fiducial)
-
-                        for crop_num in range(num_crops):
-                            rotated_image = rotated_crop(bval[directory][0:1], *crop_dim, degrees, fiducial, [ijk])[0]
+                        center_crop = crop_from_center([bval[directory][0]], [ijk], *crop_dim, i_offset=0,
+                                                       j_offset=0)[0]
+                        bval[directory].append(center_crop)
+                        for crop_num in range(1, num_crops):
+                            rotated_image = rotated_crop([bval[directory][0]], *crop_dim, degrees, fiducial,
+                                                         [ijk])[0]
                             bval[directory].append(rotated_image)
-            bval[directory] = bval[directory][1:]
         except:
             print(directory)
-
     return bval
 
 
@@ -656,9 +635,11 @@ class KGHProstateImages(Dataset):
         self.dir = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh"
         self.folders = os.listdir(self.dir)
         self.length = len(self.folders)
+        self.images = ["{}.nrrd".format(x) for x in range(len(os.listdir("{}/{}".format(self.dir, self.folders[0]))))]
+        self.images.sort(key=lambda x: int(x.split('.')[0]))
         kgh_labels_file = "/home/andrewg/PycharmProjects/assignments/data/KGHData/kgh.csv"
         cancer_labels = pd.read_csv(kgh_labels_file)[["anonymized", "Total Gleason Xypeguide"]]
-        cancer_labels = cancer_labels.drop([0, 7, 9, 14, 18, 22, 35, 71, 73])
+        cancer_labels = cancer_labels.drop([0, 7, 8, 9, 14, 18, 22, 35, 71, 73, 81, 82, 83])
         for idx, val in cancer_labels["Total Gleason Xypeguide"].iteritems():
             if val == '0':
                 cancer_labels["Total Gleason Xypeguide"][idx] = 0
@@ -678,15 +659,68 @@ class KGHProstateImages(Dataset):
     def __getitem__(self, idx):
         patient_id = self.folders[idx]
         image_dir = "{}/{}".format(self.dir, patient_id)
-        images = os.listdir(image_dir)
         image_tensor = torch.from_numpy(np.asarray([sitk.GetArrayFromImage(
                        self.normalize.Execute(sitk.ReadImage("{}/{}".format(image_dir, image)))
-                       ) for image in images])).float().to(self.device)
+                       ) for image in self.images])).float().to(self.device)
         cancer_label = self.csv.loc[self.csv.anonymized == '_'.join(patient_id.split('_')[:2])]
-        try:
-            cancer_label = int(cancer_label["Total Gleason Xypeguide"])
-        except:
-            print(patient_id)
-        return {"image": image_tensor, "cancer": cancer_label}
+        cancer_label = int(cancer_label["Total Gleason Xypeguide"])
+        return {"image": image_tensor, "cancer": cancer_label, "index": self.folders[idx]}
 
 
+def change_requires_grad(model, first_n_layers, new_grad):
+    """
+    This function either turns off or the turns on the gradient for 'first_n_layers' layers
+    :param model: The model we would like to freeze/unfreeze some of the layers for
+    :param first_n_layers: The number of layers we would like to freeze/unfreeze, starting from the first layer
+    :param new_grad: If true, this unfreezes the first 'first_n_layers' layers, else freezes them
+    :return: None
+    """
+    parameters = model.children()
+    for idx in range(first_n_layers):
+        child = next(parameters, None)
+        if child:
+            child.requires_grad = new_grad
+            if "bias" in dir(child):
+                child.bias.requires_grad = new_grad
+        else:
+            print("There were only {} layers".format(first_n_layers - 1))
+            return
+
+
+def bootstrap_auc(y_true, y_pred, ax, nsamples=1000):
+
+    from scipy.interpolate import interp1d
+
+    auc_values = []
+
+    tpr_values = []
+
+    for b in range(nsamples):
+
+        idx = np.random.randint(y_true.shape[0], size=y_true.shape[0])
+        y_true_bs = y_true[idx]
+        y_pred_bs = y_pred[idx]
+        fpr, tpr, _ = roc_curve(y_true_bs, y_pred_bs, drop_intermediate=True)
+
+        if b == 0:
+            fpr_interp = fpr
+
+        f = interp1d(fpr, tpr)
+        tpr_interp = f(fpr_interp)
+        roc_auc = roc_auc_score(y_true_bs, y_pred_bs)
+        auc_values.append(roc_auc)
+        tpr_values.append(tpr_interp)
+
+    auc_ci = np.percentile(auc_values, (2.5, 97.5))
+    auc_mean = np.mean(auc_values)
+    tprs_ci = np.percentile(tpr_values, (2.5, 97.5), axis=0)
+    tprs_mean = np.mean(tpr_values, axis=0)
+    ax.fill_between(fpr_interp, tprs_ci[0], tprs_ci[1], color='k', alpha=0.2, zorder=1, label='95% CI')
+    ax.plot(fpr_interp, tprs_mean, color='k', label='AUC: {0:.3f} ({1:.3f}-{2:.3f})'.format(auc_mean, auc_ci[0], auc_ci[1]), linewidth=0.8, zorder=0)
+    ax.plot([0, 1], [0, 1], color='crimson', linestyle='--', alpha=1, linewidth=1.5, label='Reference')
+    ax.set_xlim([-0.01, 1.00])
+    ax.set_ylim([-0.01, 1.01])
+    ax.set_ylabel('Sensitivity')
+    ax.set_xlabel('1 - Specificity')
+    plt.legend(loc="lower right")
+    plt.grid(color='k', alpha=0.5)

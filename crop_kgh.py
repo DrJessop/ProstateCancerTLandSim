@@ -13,5 +13,5 @@ if __name__ == "__main__":
         if key in os.listdir(crops_directory):
             shutil.rmtree(patient_folder)
         os.mkdir(patient_folder)
-        for crop_num in range(num_crops):
-            sitk.WriteImage(bval[key][crop_num], "{}/{}.nrrd".format(patient_folder, crop_num))
+        for img_id in range(1, num_crops + 1):  # The first image is just the resampled un-cropped image
+            sitk.WriteImage(bval[key][img_id], "{}/{}.nrrd".format(patient_folder, img_id - 1))

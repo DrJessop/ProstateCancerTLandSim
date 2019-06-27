@@ -5,9 +5,8 @@ import torch.utils.data
 from torch.utils.data import DataLoader
 import pandas as pd
 import pickle as pk
-import numpy as np
 from data_helpers import ProstateImages, k_fold_cross_validation
-from models import CNN
+from models import CNN, CNN2
 
 
 def read_cropped_images(modality):
@@ -82,29 +81,23 @@ if __name__ == "__main__":
     image_folder_contents = os.listdir("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/{}".format(
                                                                                                             modality))
 
-    with open("/home/andrewg/PycharmProjects/assignments/train_key_mappings.pkl", "rb") as f:
+    with open("/home/andrewg/PycharmProjects/assignments/train_key_mappings2.pkl", "rb") as f:
         train_key_mappings = pk.load(f)
-    with open("/home/andrewg/PycharmProjects/assignments/fold_key_mappings.pkl", "rb") as f:
+    with open("/home/andrewg/PycharmProjects/assignments/fold_key_mappings2.pkl", "rb") as f:
         fold_key_mappings = pk.load(f)
 
-    f = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/train"
-    with open("{}/{}".format(f, "{}_mean_tensor.npy".format(modality)), "rb") as g:
-        mean_tensor = np.load(g)
-    with open("{}/{}".format(f, "{}_std_tensor.npy".format(modality)), "rb") as h:
-        standard_deviation_tensor = np.load(h)
-
-    p_images_train = ProstateImages(modality=modality, train=True, device=device,
+    p_images_train = ProstateImages(modality=modality, train=True, device=device, normalize_strategy=1,
                                     mapping=train_key_mappings)
 
-    p_images_validation = ProstateImages(modality=modality, train=True, device=device,
+    p_images_validation = ProstateImages(modality=modality, train=True, device=device, normalize_strategy=1,
                                          mapping=fold_key_mappings)
 
     dataloader_train = DataLoader(p_images_train, batch_size=batch_size_train, shuffle=True)
     dataloader_val = DataLoader(p_images_validation, batch_size=batch_size_val)
 
-    models_and_scores = k_fold_cross_validation(CNN, K=5, train_data=(p_images_train, dataloader_train),
+    models_and_scores = k_fold_cross_validation(CNN, K=1, train_data=(p_images_train, dataloader_train),
                                                 val_data=(p_images_validation, dataloader_val), epochs=30,
-                                                loss_function=loss_function, lr=0.001, show=True,
+                                                loss_function=loss_function, lr=0.0001, show=True,
                                                 weight_decay=0.05)
     p_images_test = ProstateImages(modality=modality, train=False, device=device)
     dataloader_test = DataLoader(p_images_test, batch_size=batch_size_test, shuffle=False)
@@ -113,11 +106,6 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt",
                                      map_location=device))
     model.cuda(cuda_destination)
-
-    print(model(torch.load("/home/andrewg/wtf.pt")))
-    input()
-    results = test_predictions(dataloader_test, model)
-    print(results)
 
     model_dir = "/home/andrewg/PycharmProjects/assignments/predictions/models"
     predictions_dir = "/home/andrewg/PycharmProjects/assignments/predictions/prediction_files"
@@ -140,6 +128,6 @@ if __name__ == "__main__":
         next_result = "1.csv"
 
     # torch.save(models_and_scores[0][0].state_dict(), "{}/{}".format(model_dir, next_model))
-    unsure_images_ids = results.query("0.45 <= ClinSig <= 0.55").index
+    # unsure_images_ids = results.query("0.45 <= ClinSig <= 0.55").index
     # results.ClinSig.iloc[unsure_images_ids] = results.ClinSig.iloc[unsure_images_ids].apply(lambda x: 0.3)
     # results.to_csv("{}/{}".format(predictions_dir, next_result))

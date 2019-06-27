@@ -3,7 +3,8 @@ from A1 import create_patients
 import os
 import pandas as pd
 import shutil
-from data_helpers import image_cropper, resample_all_images
+from data_helpers import image_cropper, resample_all_images, write_cropped_images_train_and_folds
+import pickle as pk
 
 
 def write_cropped_images_test(cropped_images):
@@ -118,18 +119,18 @@ if __name__ == "__main__":
 
     num_crops = 20
 
-    # cropped_images_train = image_cropper(findings_train, resampled_images, padding_filter, *desired_patch_dimensions,
-    #                                      num_crops_per_image=num_crops, train=True)
+    cropped_images_train = image_cropper(findings_train, resampled_images, padding_filter, *desired_patch_dimensions,
+                                         num_crops_per_image=num_crops, train=True)
 
-    # fold_key_mappings, train_key_mappings = write_cropped_images_train_and_folds(cropped_images_train,
-    #                                                                              num_crops=num_crops)
-    """
+    fold_key_mappings, train_key_mappings = write_cropped_images_train_and_folds(cropped_images_train,
+                                                                                 num_crops=num_crops)
+
     with open("/home/andrewg/PycharmProjects/assignments/fold_key_mappings2.pkl", 'wb') as output:
         pk.dump(fold_key_mappings, output, pk.HIGHEST_PROTOCOL)
 
     with open("/home/andrewg/PycharmProjects/assignments/train_key_mappings2.pkl", 'wb') as output:
         pk.dump(train_key_mappings, output, pk.HIGHEST_PROTOCOL)
-    """
+
     cropped_images_test = image_cropper(findings_test, resampled_images, padding_filter, *desired_patch_dimensions,
                                         num_crops_per_image=1, train=False)
 

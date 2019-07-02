@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
-from models import CNN, CNN2
+from models import CNN
 from data_helpers import train_model, KGHProstateImages, change_requires_grad
 from adabound import AdaBound
 
@@ -18,7 +18,7 @@ if __name__ == "__main__":
     device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
 
     # Prepare the data
-    data = KGHProstateImages(device=device)
+    data = KGHProstateImages(device=device, modality="bval")
     num_train = int(0.8 * len(data))
     num_val = len(data) - num_train
     training_data, testing_data = torch.utils.data.random_split(data, (num_train, num_val))
@@ -29,10 +29,10 @@ if __name__ == "__main__":
     num_layers = 9
     lr = 0.00001
     final_lr = lr * 100
-    weight_decay = 0.06
-    num_epochs = 120
+    weight_decay = 0.05
+    num_epochs = 40
 
-    for num_layers_to_freeze in range(6, num_layers):
+    for num_layers_to_freeze in range(7, num_layers):
         print("{} layers frozen".format(num_layers_to_freeze))
         model = CNN(cuda_destination)
         model.cuda(cuda_destination)

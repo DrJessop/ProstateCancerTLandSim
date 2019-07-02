@@ -450,6 +450,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     f1_eval = []
     auc_eval = []
     num_training_batches = len(train_data)
+    best_auc = 0
     for epoch in range(epochs):
         model.train()  # Training mode
         train_iter = iter(train_data)
@@ -502,6 +503,9 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         f1_eval.append(f1_score(all_actual, all_preds))
         fpr, tpr, _ = roc_curve(all_actual, all_preds, pos_label=1)
         auc_eval.append(auc(fpr, tpr))
+
+        if auc_eval[-1] > best_auc:
+            best_auc = auc_eval[-1]
         eval_errors.append(eval_loss_avg)
 
     if show:
@@ -520,11 +524,13 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         plt.legend(["training auc", "validation auc"])
         plt.title("AUC Training vs AUC Cross-Validation")
         plt.show()
+
+    print("The best AUC on the validation set during training was {}".format(best_auc))
     return auc_train[-1], f1_train[-1], auc_eval[-1], f1_eval[-1]
 
 
-def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_function, lr=0.005, final_lr=0.05,
-                            momentum=0.9, weight_decay=0.04, show=True, cuda_destination=1):
+def k_fold_cross_validation(network, k_low, k_high, train_data, val_data, epochs, loss_function, lr=0.005,
+                            final_lr=0.05, momentum=0.9, weight_decay=0.04, show=True, cuda_destination=1):
     """
     Given training and validation data, performs K-fold cross-validation.
     :param network: Instance of the class you will use as the network
@@ -548,7 +554,7 @@ def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_funct
     val_data, val_dataloader = val_data
     auc_train_avg, f1_train_avg, auc_eval_avg, f1_eval_avg = [], [], [], []
     models = []
-    for k in range(K):
+    for k in range(k_low, k_high):
         print("Fold {}".format(k + 1))
         model = network(cuda_destination)
         model.cuda(model.cuda_destination)
@@ -586,7 +592,7 @@ def k_fold_cross_validation(network, K, train_data, val_data, epochs, loss_funct
     return list(zip(models, scores))
 
 
-def create_bval_kgh_patients(num_crops, crop_dim):
+def create_kgh_patient_crops(num_crops, crop_dim):
     """
     This function produces a dictionary of cropped images from the KGH data
     :param num_crops: The desired number of crops for a given image
@@ -596,50 +602,80 @@ def create_bval_kgh_patients(num_crops, crop_dim):
     kgh_data_dir = "/home/andrewg/PycharmProjects/assignments/data/KGHData"
     directories = os.listdir(kgh_data_dir)
     bval = dict()
+    adc = dict()
+    t2 = dict()
     degrees = [5, 10, 15, 20, 25]
-    # degrees = [-degree for degree in degrees] + degrees
     for directory in directories:
         sub_directory = "{}/{}".format(kgh_data_dir, directory)
         if not(os.path.isdir(sub_directory)):
             continue
         sub_directory_contents = os.listdir(sub_directory)
+        bval_nrrd_file, adc_nrrd_file, t2_nrrd_file = None, None, None
         for file in sub_directory_contents:
-            if "nrrd" in file:
+            if "nrrd" in file and "bval" in file:
                 bval_nrrd_file = file  # file becomes the nrrd file name at this point
-                break
-        else:
-            continue  # if the for loop never runs
+            if "nrrd" in file and "adc" in file:
+                adc_nrrd_file = file
+            if "nrrd" in file and "t2" in file:
+                t2_nrrd_file = file
+
+        if not bval_nrrd_file or not adc_nrrd_file or not t2_nrrd_file:
+            continue
         bval_nrrd_file = "{}/{}".format(sub_directory, bval_nrrd_file)
+        adc_nrrd_file = "{}/{}".format(sub_directory, adc_nrrd_file)
+        t2_nrrd_file = "{}/{}".format(sub_directory, t2_nrrd_file)
         try:
             with open("{}/fiducials/{}".format(kgh_data_dir, directory)) as fid_file:
                 bval[directory] = [resample_image(sitk.ReadImage(bval_nrrd_file), out_spacing=(2, 2, 3))]
+                adc[directory] = [resample_image(sitk.ReadImage(adc_nrrd_file), out_spacing=(2, 2, 3))]
+                t2[directory] = [resample_image(sitk.ReadImage(t2_nrrd_file), out_spacing=(2, 2, 3))]
                 for idx, line in enumerate(fid_file):
                     if idx == 3:
                         fiducial = list(map(float, line.split(',')[1:4]))
                         fiducial[0], fiducial[1] = -fiducial[0], -fiducial[1]
-                        ijk = bval[directory][0].TransformPhysicalPointToIndex(fiducial)
-                        center_crop = crop_from_center([bval[directory][0]], [ijk], *crop_dim, i_offset=0,
-                                                       j_offset=0)[0]
-                        bval[directory].append(center_crop)
+                        ijk_bval = bval[directory][0].TransformPhysicalPointToIndex(fiducial)
+                        center_crop_bval = crop_from_center([bval[directory][0]], [ijk_bval], *crop_dim, i_offset=0,
+                                                            j_offset=0)[0]
+
+                        ijk_adc = adc[directory][0].TransformPhysicalPointToIndex(fiducial)
+                        center_crop_adc = crop_from_center([adc[directory][0]], [ijk_adc], *crop_dim, i_offset=0,
+                                                           j_offset=0)[0]
+
+                        ijk_t2 = t2[directory][0].TransformPhysicalPointToIndex(fiducial)
+                        center_crop_t2 = crop_from_center([t2[directory][0]], [ijk_t2], *crop_dim, i_offset=0,
+                                                          j_offset=0)[0]
+
+                        bval[directory].append(center_crop_bval)
+                        adc[directory].append(center_crop_adc)
+                        t2[directory].append(center_crop_t2)
+
                         for crop_num in range(1, num_crops):
-                            rotated_image = rotated_crop([bval[directory][0]], *crop_dim, degrees, fiducial,
-                                                         [ijk])[0]
-                            bval[directory].append(rotated_image)
+                            rotated_image_bval = rotated_crop([bval[directory][0]], *crop_dim, degrees, fiducial,
+                                                         [ijk_bval])[0]
+                            bval[directory].append(rotated_image_bval)
+
+                            rotated_image_adc = rotated_crop([adc[directory][0]], *crop_dim, degrees, fiducial,
+                                                         [ijk_adc])[0]
+                            adc[directory].append(rotated_image_adc)
+
+                            rotated_image_t2 = rotated_crop([t2[directory][0]], *crop_dim, degrees, fiducial,
+                                                         [ijk_t2])[0]
+                            t2[directory].append(rotated_image_t2)
         except:
             print(directory)
-    return bval
+    return bval, adc, t2
 
 
 class KGHProstateImages(Dataset):
-    def __init__(self, device):
-        self.dir = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh"
+    def __init__(self, device, modality):
+        self.dir = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh/{}".format(modality)
         self.folders = os.listdir(self.dir)
         self.length = len(self.folders)
         self.images = ["{}.nrrd".format(x) for x in range(len(os.listdir("{}/{}".format(self.dir, self.folders[0]))))]
         self.images.sort(key=lambda x: int(x.split('.')[0]))
         kgh_labels_file = "/home/andrewg/PycharmProjects/assignments/data/KGHData/kgh.csv"
         cancer_labels = pd.read_csv(kgh_labels_file)[["anonymized", "Total Gleason Xypeguide"]]
-        cancer_labels = cancer_labels.drop([0, 7, 8, 9, 14, 18, 22, 35, 71, 73, 81, 82, 83])
+        cancer_labels = cancer_labels.drop([0, 7, 9, 14, 18, 22, 35, 71, 73, 81, 82, 83])
         for idx, val in cancer_labels["Total Gleason Xypeguide"].iteritems():
             if val == '0':
                 cancer_labels["Total Gleason Xypeguide"][idx] = 0

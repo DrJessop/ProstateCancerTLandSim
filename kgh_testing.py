@@ -20,7 +20,7 @@ if __name__ == "__main__":
         map_location=device))
     model.cuda(cuda_destination)
     model.eval()
-    data = KGHProstateImages(device)
+    data = KGHProstateImages(device, modality="bval")
 
     original_images = data[0]["image"][0].unsqueeze(0)
     target = torch.tensor(data[0]["cancer"]).unsqueeze(0)

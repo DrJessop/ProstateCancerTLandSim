@@ -6,7 +6,7 @@ import SimpleITK as sitk
 import numpy as np
 import adabound
 import matplotlib.pyplot as plt
-from sklearn.metrics import f1_score, auc, roc_curve, roc_auc_score
+from sklearn.metrics import f1_score, auc, roc_curve, roc_auc_score, confusion_matrix
 import random
 from image_augmentation import rotation3d
 import shutil
@@ -426,7 +426,7 @@ def flatten_batch(image_shape, images, class_vector, cuda_destination):
     return images, class_vector
 
 
-def train_model(train_data, val_data, model, epochs, optimizer, loss_function, show=False):
+def train_model(train_data, val_data, model, epochs, optimizer, loss_function, softmax=False, show=False):
     """
     This function trains a model with batches of a given size, and if show=True, plots the loss, f1, and auc scores for
     the training and validation sets
@@ -466,9 +466,18 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
                 images, class_vector = flatten_batch(image_shape, images, class_vector, model.cuda_destination)
 
             optimizer.zero_grad()
+            images = images.squeeze(1).cuda(model.cuda_destination)
             preds = model(images)
+
+            class_vector = class_vector.squeeze(1)
+            if softmax:
+                class_vector = class_vector.long()
+
             loss = loss_function(preds, class_vector)
-            hard_preds = torch.round(preds)
+
+            if softmax:
+                hard_preds = torch.tensor([torch.argmax(tup) for tup in preds])
+
             all_preds.extend(hard_preds.squeeze(-1).tolist())
             all_actual.extend(class_vector.squeeze(-1).tolist())
             train_loss += loss.item()
@@ -492,12 +501,18 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
                 image_shape = images.shape
                 if len(image_shape) != 4:
                     images, class_vector = flatten_batch(image_shape, images, class_vector, model.cuda_destination)
+                images = images.squeeze(1).cuda(model.cuda_destination)
                 preds = model(images)
+                class_vector = class_vector.squeeze(1)
+                if softmax:
+                    class_vector = class_vector.long()
                 loss = loss_function(preds, class_vector)
                 eval_loss += loss.item()
-                hard_preds = torch.round(preds)
+                if softmax:
+                    hard_preds = torch.tensor([torch.argmax(tup) for tup in preds])
                 all_preds.extend(hard_preds.squeeze(-1).tolist())
                 all_actual.extend(class_vector.squeeze(-1).tolist())
+
         eval_loss_avg = eval_loss / num_val_batches
         print("Loss Epoch {}, Training: {}, Validation: {}".format(epoch + 1, train_loss_avg, eval_loss_avg))
         f1_eval.append(f1_score(all_actual, all_preds))
@@ -505,6 +520,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         auc_eval.append(auc(fpr, tpr))
 
         if auc_eval[-1] > best_auc:
+            conf_matrix = confusion_matrix(all_actual, all_preds)
             best_auc = auc_eval[-1]
         eval_errors.append(eval_loss_avg)
 
@@ -526,11 +542,12 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         plt.show()
 
     print("The best AUC on the validation set during training was {}".format(best_auc))
-    return auc_train[-1], f1_train[-1], auc_eval[-1], f1_eval[-1]
+    return conf_matrix, auc_train[-1], f1_train[-1], auc_eval[-1], f1_eval[-1]
 
 
 def k_fold_cross_validation(network, k_low, k_high, train_data, val_data, epochs, loss_function, lr=0.005,
-                            final_lr=0.05, momentum=0.9, weight_decay=0.04, show=True, cuda_destination=1):
+                            final_lr=0.05, momentum=0.9, weight_decay=0.04, softmax=False,
+                            show=True, cuda_destination=1):
     """
     Given training and validation data, performs K-fold cross-validation.
     :param network: Instance of the class you will use as the network
@@ -564,8 +581,9 @@ def k_fold_cross_validation(network, k_low, k_high, train_data, val_data, epochs
         he_initialize(model)
         train_data.change_map_num(k)
         val_data.change_map_num(k)
-        auc_train, f1_train, auc_eval, f1_eval = train_model(train_dataloader, val_dataloader, model, epochs, optimizer,
-                                                             loss_function, show=True)
+        _, auc_train, f1_train, auc_eval, f1_eval = train_model(train_dataloader, val_dataloader, model, epochs,
+                                                                optimizer, loss_function, softmax=softmax,
+                                                                show=True)
         auc_train_avg.append(auc_train)
         f1_train_avg.append(f1_train)
         auc_eval_avg.append(auc_eval)
@@ -760,3 +778,16 @@ def bootstrap_auc(y_true, y_pred, ax, nsamples=1000):
     ax.set_xlabel('1 - Specificity')
     plt.legend(loc="lower right")
     plt.grid(color='k', alpha=0.5)
+
+
+def nrrd_to_tensor(file):
+    """
+    This function takes a nrrd file path as input and returns the image as a tensor after normalization
+    :param file: A string which specifies the file path of the nrrd file
+    :return: A torch tensor that is normalized
+    """
+    image = sitk.ReadImage(file)
+    image = sitk.NormalizeImageFilter().Execute(image)
+    image = sitk.GetArrayFromImage(image).astype(np.float64)
+    image = torch.from_numpy(image)
+    return image

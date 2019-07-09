@@ -57,6 +57,7 @@ def test_predictions(dataloader, model):
 
     for idx, batch in enumerate(dataloader):
         outputs = model(batch["image"])
+        outputs = torch.tensor([tup[1] for tup in outputs])
         start_batch = end_batch
         end_batch = start_batch + len(outputs)
         predictions["ClinSig"].iloc[start_batch: end_batch] = outputs.flatten().tolist()
@@ -73,7 +74,8 @@ if __name__ == "__main__":
     batch_size_train = 100
     batch_size_val = 50
     batch_size_test = 50
-    loss_function = nn.BCELoss().cuda(cuda_destination)
+    # loss_function = nn.BCELoss().cuda(cuda_destination)
+    loss_function = nn.CrossEntropyLoss().cuda(cuda_destination)
 
     ngpu = 1
     device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
@@ -95,9 +97,9 @@ if __name__ == "__main__":
     dataloader_train = DataLoader(p_images_train, batch_size=batch_size_train, shuffle=True)
     dataloader_val = DataLoader(p_images_validation, batch_size=batch_size_val)
 
-    models_and_scores = k_fold_cross_validation(CNN, k_low=2, k_high=3, train_data=(p_images_train, dataloader_train),
-                                                val_data=(p_images_validation, dataloader_val), epochs=40,
-                                                loss_function=loss_function, lr=0.00001, show=True,
+    models_and_scores = k_fold_cross_validation(CNN2, k_low=2, k_high=3, train_data=(p_images_train, dataloader_train),
+                                                val_data=(p_images_validation, dataloader_val), epochs=75,
+                                                loss_function=loss_function, lr=0.00001, softmax=True, show=True,
                                                 final_lr=0.01)
     p_images_test = ProstateImages(modality=modality, train=False, device=device)
     dataloader_test = DataLoader(p_images_test, batch_size=batch_size_test, shuffle=False)

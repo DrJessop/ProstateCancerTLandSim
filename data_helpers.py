@@ -11,6 +11,7 @@ import random
 from image_augmentation import rotation3d
 import shutil
 import pandas as pd
+import copy
 
 
 def resample_image(itk_image, out_spacing, is_label=False):
@@ -443,6 +444,8 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     :return: AUC and F1 train, AUC and F1 validation
     """
 
+    if softmax:
+        initialize_CNN2(model)
     errors = []
     eval_errors = []
     f1_train = []
@@ -464,12 +467,11 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
             image_shape = images.shape
             if len(image_shape) != 4:
                 images, class_vector = flatten_batch(image_shape, images, class_vector, model.cuda_destination)
-
             optimizer.zero_grad()
-            images = images.squeeze(1).cuda(model.cuda_destination)
             preds = model(images)
 
             class_vector = class_vector.squeeze(1)
+
             if softmax:
                 class_vector = class_vector.long()
 
@@ -477,6 +479,8 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
 
             if softmax:
                 hard_preds = torch.tensor([torch.argmax(tup) for tup in preds])
+            else:
+                hard_preds = torch.round(preds)
 
             all_preds.extend(hard_preds.squeeze(-1).tolist())
             all_actual.extend(class_vector.squeeze(-1).tolist())
@@ -501,7 +505,6 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
                 image_shape = images.shape
                 if len(image_shape) != 4:
                     images, class_vector = flatten_batch(image_shape, images, class_vector, model.cuda_destination)
-                images = images.squeeze(1).cuda(model.cuda_destination)
                 preds = model(images)
                 class_vector = class_vector.squeeze(1)
                 if softmax:
@@ -510,6 +513,8 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
                 eval_loss += loss.item()
                 if softmax:
                     hard_preds = torch.tensor([torch.argmax(tup) for tup in preds])
+                else:
+                    hard_preds = torch.round(preds)
                 all_preds.extend(hard_preds.squeeze(-1).tolist())
                 all_actual.extend(class_vector.squeeze(-1).tolist())
 
@@ -520,8 +525,13 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         auc_eval.append(auc(fpr, tpr))
 
         if auc_eval[-1] > best_auc:
+            auc_train_of_best_model = auc_train[-1]
+            f1_train_of_best_model = f1_train[-1]
+
             conf_matrix = confusion_matrix(all_actual, all_preds)
             best_auc = auc_eval[-1]
+            best_f1 = f1_eval[-1]
+            best_model = copy.deepcopy(model)
         eval_errors.append(eval_loss_avg)
 
     if show:
@@ -542,7 +552,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
         plt.show()
 
     print("The best AUC on the validation set during training was {}".format(best_auc))
-    return conf_matrix, auc_train[-1], f1_train[-1], auc_eval[-1], f1_eval[-1]
+    return best_model, conf_matrix, auc_train_of_best_model, f1_train_of_best_model, best_auc, best_f1
 
 
 def k_fold_cross_validation(network, k_low, k_high, train_data, val_data, epochs, loss_function, lr=0.005,
@@ -581,9 +591,9 @@ def k_fold_cross_validation(network, k_low, k_high, train_data, val_data, epochs
         he_initialize(model)
         train_data.change_map_num(k)
         val_data.change_map_num(k)
-        _, auc_train, f1_train, auc_eval, f1_eval = train_model(train_dataloader, val_dataloader, model, epochs,
-                                                                optimizer, loss_function, softmax=softmax,
-                                                                show=True)
+        model, _, auc_train, f1_train, auc_eval, f1_eval = train_model(train_dataloader, val_dataloader, model, epochs,
+                                                                       optimizer, loss_function, softmax=softmax,
+                                                                       show=True)
         auc_train_avg.append(auc_train)
         f1_train_avg.append(f1_train)
         auc_eval_avg.append(auc_eval)
@@ -713,6 +723,7 @@ class KGHProstateImages(Dataset):
     def __getitem__(self, idx):
         patient_id = self.folders[idx]
         image_dir = "{}/{}".format(self.dir, patient_id)
+
         image_tensor = torch.from_numpy(np.asarray([sitk.GetArrayFromImage(
                        self.normalize.Execute(sitk.ReadImage("{}/{}".format(image_dir, image)))
                        ) for image in self.images])).float().to(self.device)
@@ -791,3 +802,18 @@ def nrrd_to_tensor(file):
     image = sitk.GetArrayFromImage(image).astype(np.float64)
     image = torch.from_numpy(image)
     return image
+
+
+def initialize_CNN2(cnn2_model):
+    cnn_model = torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt")
+    layers = ["conv1.weight", "conv1.bias", "conv2.weight", "conv2.bias", "conv3.weight", "conv3.bias", "conv4.weight",
+              "conv4.bias", "conv5.weight", "conv5.bias"]
+    state_dict = cnn2_model.state_dict()
+    idx = 0
+    for name, param in state_dict.items():
+        layer = layers[idx]
+        transformed_param = cnn_model[layer]
+        state_dict[name].copy_(transformed_param)
+        idx = idx + 1
+        if idx == len(layers):
+            return

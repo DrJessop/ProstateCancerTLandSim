@@ -39,7 +39,7 @@ def read_cropped_images(modality):
     return cropped_images
 
 
-def test_predictions(dataloader, model):
+def test_predictions(dataloader, model, softmax=False):
     """
     This function runs the model on the batches in the test set and returns a dataframe with ProxID, fid, and ClinSig
     columns. The predictions x <- ClinSig, 0 <= x <= 1, x <- R.
@@ -57,7 +57,8 @@ def test_predictions(dataloader, model):
 
     for idx, batch in enumerate(dataloader):
         outputs = model(batch["image"])
-        outputs = torch.tensor([tup[1] for tup in outputs])
+        if softmax:
+            outputs = torch.tensor([tup[1] for tup in outputs])
         start_batch = end_batch
         end_batch = start_batch + len(outputs)
         predictions["ClinSig"].iloc[start_batch: end_batch] = outputs.flatten().tolist()
@@ -74,9 +75,13 @@ if __name__ == "__main__":
     batch_size_train = 100
     batch_size_val = 50
     batch_size_test = 50
-    # loss_function = nn.BCELoss().cuda(cuda_destination)
-    loss_function = nn.CrossEntropyLoss().cuda(cuda_destination)
-
+    softmax = True
+    if softmax:
+        loss_function = nn.CrossEntropyLoss().cuda(cuda_destination)
+        model = CNN2
+    else:
+        loss_function = nn.BCELoss().cuda(cuda_destination)
+        model = CNN
     ngpu = 1
     device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
     modality = "bval"
@@ -97,9 +102,9 @@ if __name__ == "__main__":
     dataloader_train = DataLoader(p_images_train, batch_size=batch_size_train, shuffle=True)
     dataloader_val = DataLoader(p_images_validation, batch_size=batch_size_val)
 
-    models_and_scores = k_fold_cross_validation(CNN2, k_low=2, k_high=3, train_data=(p_images_train, dataloader_train),
+    models_and_scores = k_fold_cross_validation(model, k_low=3, k_high=4, train_data=(p_images_train, dataloader_train),
                                                 val_data=(p_images_validation, dataloader_val), epochs=75,
-                                                loss_function=loss_function, lr=0.00001, softmax=True, show=True,
+                                                loss_function=loss_function, lr=0.00001, softmax=softmax, show=True,
                                                 final_lr=0.01)
     p_images_test = ProstateImages(modality=modality, train=False, device=device)
     dataloader_test = DataLoader(p_images_test, batch_size=batch_size_test, shuffle=False)
@@ -130,7 +135,7 @@ if __name__ == "__main__":
     else:
         next_result = "1.csv"
 
-    results = test_predictions(dataloader_test, model)
+    results = test_predictions(dataloader_test, model, softmax=softmax)
     torch.save(models_and_scores[0][0].state_dict(), "{}/{}".format(model_dir, next_model))
     # unsure_images_ids = results.query("0.45 <= ClinSig <= 0.55").index
     # results.ClinSig.iloc[unsure_images_ids] = results.ClinSig.iloc[unsure_images_ids].apply(lambda x: 0.3)

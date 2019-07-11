@@ -1,8 +1,9 @@
 import torch.utils.data
-from models import CNN
+from models import CNN, CNN2
 from sklearn.metrics import auc, roc_curve
 from data_helpers import KGHProstateImages, bootstrap_auc
 import matplotlib.pyplot as plt
+import numpy as np
 
 if __name__ == "__main__":
     seed = 0
@@ -34,6 +35,7 @@ if __name__ == "__main__":
     class_vector = target.to(device).float()
 
     predictions = model(original_images).cpu().detach().numpy()
+    # predictions = np.array([prediction[1] for prediction in predictions])
     targets = class_vector.cpu().detach().numpy()
 
     fig = plt.figure()

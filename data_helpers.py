@@ -420,7 +420,7 @@ def flatten_batch(image_shape, images, class_vector, cuda_destination):
     :return: The flattened images and the lengthened class vector
     """
 
-    class_vector = torch.tensor([class_vector[idx].tolist() * image_shape[1] for idx in
+    class_vector = torch.tensor([[class_vector[idx]] * image_shape[1] for idx in
                                  range(image_shape[0])]).float().cuda(cuda_destination).unsqueeze(1)
     class_vector = class_vector.view(-1).unsqueeze(1)
     images = images.view(images.shape[0] * images.shape[1], *images.shape[2:])
@@ -483,7 +483,10 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
                 hard_preds = torch.round(preds)
 
             all_preds.extend(hard_preds.squeeze(-1).tolist())
-            all_actual.extend(class_vector.squeeze(-1).tolist())
+            try:
+                all_actual.extend(class_vector.squeeze(-1).tolist())
+            except:
+                all_actual.append(class_vector.squeeze(-1).tolist())
             train_loss += loss.item()
             loss.backward()
             optimizer.step()
@@ -516,7 +519,10 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
                 else:
                     hard_preds = torch.round(preds)
                 all_preds.extend(hard_preds.squeeze(-1).tolist())
-                all_actual.extend(class_vector.squeeze(-1).tolist())
+                try:
+                    all_actual.extend(class_vector.squeeze(-1).tolist())
+                except:
+                    all_actual.append(class_vector.squeeze(-1).tolist())
 
         eval_loss_avg = eval_loss / num_val_batches
         print("Loss Epoch {}, Training: {}, Validation: {}".format(epoch + 1, train_loss_avg, eval_loss_avg))
@@ -632,7 +638,7 @@ def create_kgh_patient_crops(num_crops, crop_dim):
     bval = dict()
     adc = dict()
     t2 = dict()
-    degrees = [5, 10, 15, 20, 25]
+    degrees = [i for i in range(26)]
     for directory in directories:
         sub_directory = "{}/{}".format(kgh_data_dir, directory)
         if not(os.path.isdir(sub_directory)):
@@ -693,7 +699,6 @@ def create_kgh_patient_crops(num_crops, crop_dim):
             print(directory)
     return bval, adc, t2
 
-
 class KGHProstateImages(Dataset):
     def __init__(self, device, modality):
         self.dir = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh/{}".format(modality)
@@ -730,6 +735,47 @@ class KGHProstateImages(Dataset):
         cancer_label = self.csv.loc[self.csv.anonymized == '_'.join(patient_id.split('_')[:2])]
         cancer_label = int(cancer_label["Total Gleason Xypeguide"])
         return {"image": image_tensor, "cancer": cancer_label, "index": self.folders[idx]}
+
+
+class KGHProstateImagesV2(Dataset):
+    def __init__(self, device, modality, num_crops_per_image):
+        self.num_crops = num_crops_per_image
+        self.dir = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh/{}".format(modality)
+        self.folders = os.listdir(self.dir)
+        self.length = len(self.folders) * num_crops_per_image
+        self.images = ["{}.nrrd".format(x) for x in range(len(os.listdir("{}/{}".format(self.dir, self.folders[0]))))]
+        self.images.sort(key=lambda x: int(x.split('.')[0]))
+        kgh_labels_file = "/home/andrewg/PycharmProjects/assignments/data/KGHData/kgh.csv"
+        cancer_labels = pd.read_csv(kgh_labels_file)[["anonymized", "Total Gleason Xypeguide"]]
+        cancer_labels = cancer_labels.drop([0, 7, 9, 14, 18, 22, 35, 71, 73, 81, 82, 83])
+        for idx, val in cancer_labels["Total Gleason Xypeguide"].iteritems():
+            if val == '0':
+                cancer_labels["Total Gleason Xypeguide"][idx] = 0
+            elif str(val) in '123456789':
+                cancer_labels["Total Gleason Xypeguide"][idx] = 1
+            else:
+                cancer_labels["Total Gleason Xypeguide"][idx] = 0
+        valid = set(cancer_labels[cancer_labels["Total Gleason Xypeguide"] == 0].index)
+        valid.update(cancer_labels[cancer_labels["Total Gleason Xypeguide"] == 1].index)
+        self.csv = cancer_labels.loc[valid]
+        self.normalize = sitk.NormalizeImageFilter()
+        self.device = device
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        crop_id = idx % 20
+        p_id = idx // 20
+        patient_id = self.folders[p_id]
+        image_dir = "{}/{}".format(self.dir, patient_id)
+
+        image_tensor = torch.from_numpy(np.asarray([sitk.GetArrayFromImage(
+                       self.normalize.Execute(sitk.ReadImage("{}/{}".format(image_dir, self.images[crop_id])))
+                       )])).float().to(self.device)
+        cancer_label = self.csv.loc[self.csv.anonymized == '_'.join(patient_id.split('_')[:2])]
+        cancer_label = torch.tensor([int(cancer_label["Total Gleason Xypeguide"])])
+        return {"image": image_tensor, "cancer": cancer_label, "index": patient_id}
 
 
 def change_requires_grad(model, first_n_layers, new_grad):

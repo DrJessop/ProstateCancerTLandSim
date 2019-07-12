@@ -4,7 +4,7 @@ from data_helpers import create_kgh_patient_crops
 import shutil
 
 if __name__ == "__main__":
-    num_crops = 20
+    num_crops = 30
     crop_dim = (32, 32, 3)
     crops = create_kgh_patient_crops(num_crops=num_crops, crop_dim=crop_dim)
     crops_directory = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh"

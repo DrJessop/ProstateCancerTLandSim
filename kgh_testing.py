@@ -17,11 +17,11 @@ if __name__ == "__main__":
 
     model = CNN(cuda_destination=cuda_destination)
     model.load_state_dict(torch.load(
-        "/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt",
+        "/home/andrewg/PycharmProjects/assignments/predictions/models/bval/CNN/1.pt",
         map_location=device))
     model.cuda(cuda_destination)
     model.eval()
-    data = KGHProstateImages(device, modality="bval", num_crops_per_image=20)
+    data = KGHProstateImages(device, modality="bval")
 
     original_images = data[0]["image"][0].unsqueeze(0)
     target = torch.tensor(data[0]["cancer"]).unsqueeze(0)

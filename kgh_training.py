@@ -38,19 +38,25 @@ def train_test_split(data, num_crops_per_image, percent_cancer=0.5, percent_non_
     return training_data, testing_data
 
 
-def kgh_experiment(cnn_type, best_model, loss_function, hyperparameters, starting_layer=8, optimizer="adabound",
-                   re_init=True):
+def kgh_experiment(cnn_type, best_model, loss_function, hyperparameters, starting_layer=8, ending_layer=None,
+                   optimizer="adabound", re_init=True):
 
     assert optimizer in ["adabound", "sgd"]
 
-    num_layers , lr, final_lr, weight_decay, num_epochs = hyperparameters
+    if isinstance(cnn_type, CNN):
+        model_type = "CNN"
+    else:
+        model_type = "CNN2"
 
-    for num_layers_to_freeze in range(starting_layer, num_layers):
+    num_layers, lr, final_lr, weight_decay, num_epochs = hyperparameters
+
+    for num_layers_to_freeze in range(starting_layer, ending_layer):
         print("{} layers frozen".format(num_layers_to_freeze))
         model = cnn_type(cuda_destination)
         model.cuda(cuda_destination)
-        model.load_state_dict(torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/{}.pt".format(
-            best_model),
+        model.load_state_dict(torch.load(
+            "/home/andrewg/PycharmProjects/assignments/predictions/models/{}/{}/{}.pt" .format("bval", "CNN",
+                                                                                               1),
             map_location=device))
 
         if re_init:
@@ -95,7 +101,8 @@ if __name__ == "__main__":
 
     # Prepare the data
     num_crops_per_image = 20
-    data = KGHProstateImages(device=device, modality="bval")
+    modality = "adc"
+    data = KGHProstateImages(device=device, modality=modality)
 
     # training_data, testing_data = train_test_split(data, 20, percent_cancer=0.8, percent_non_cancer=0.8)
     num_train = int(0.5 * len(data))
@@ -104,7 +111,7 @@ if __name__ == "__main__":
     train_loader = DataLoader(training_data, batch_size=5, shuffle=True)
     test_loader = DataLoader(testing_data, batch_size=5)
 
-    softmax = True
+    softmax = False
 
     if softmax:
         cnn_type = CNN2
@@ -116,21 +123,22 @@ if __name__ == "__main__":
         loss_function = nn.BCELoss().cuda(cuda_destination)
 
     num_layers = 9
-    possible_epochs = (25, 50, 75)
+    num_epochs = 100
 
-    for num_epochs in possible_epochs:
-        possible_lr = (0.000001 + 0.0000005 * i for i in range(3))
-        for lr in possible_lr:
-            final_lr = 100 * lr
-            possible_weight_decay = (0.0001 + 0.00005 * i for i in range(3))
-            for weight_decay in possible_weight_decay:
-                hyperparameters = [
-                    num_layers,
-                    lr,
-                    final_lr,
-                    weight_decay,
-                    num_epochs
-                ]
+    possible_lr = (0.000001 + 0.0000005 * i for i in range(3))
+    for lr in possible_lr:
+        final_lr = 100 * lr
+        possible_weight_decay = (0.0001 + 0.00005 * i for i in range(3))
+        for weight_decay in possible_weight_decay:
+            hyperparameters = [
+                num_layers,
+                lr,
+                final_lr,
+                weight_decay,
+                num_epochs
+            ]
 
-                kgh_experiment(cnn_type, best_model, loss_function, hyperparameters, starting_layer=8, re_init=False)
+            print("Learning rate: {}, Weight decay: {}".format(lr, weight_decay))
+            kgh_experiment(cnn_type, best_model, loss_function, hyperparameters, starting_layer=8,
+                           ending_layer=9, re_init=False)
 

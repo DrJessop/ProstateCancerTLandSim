@@ -75,16 +75,23 @@ if __name__ == "__main__":
     batch_size_train = 100
     batch_size_val = 50
     batch_size_test = 50
-    softmax = True
+    k_low, k_high = 0, 5
+    epochs = 20
+    lr = 0.00001
+    final_lr = 0.01
+    softmax = False
     if softmax:
         loss_function = nn.CrossEntropyLoss().cuda(cuda_destination)
         model = CNN2
+        model_type = "CNN2"
     else:
         loss_function = nn.BCELoss().cuda(cuda_destination)
         model = CNN
+        model_type = "CNN"
+
     ngpu = 1
     device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
-    modality = "bval"
+    modality = "adc"
     image_folder_contents = os.listdir("/home/andrewg/PycharmProjects/assignments/resampled_cropped/train/{}".format(
                                                                                                             modality))
 
@@ -102,10 +109,10 @@ if __name__ == "__main__":
     dataloader_train = DataLoader(p_images_train, batch_size=batch_size_train, shuffle=True)
     dataloader_val = DataLoader(p_images_validation, batch_size=batch_size_val)
 
-    models_and_scores = k_fold_cross_validation(model, k_low=3, k_high=4, train_data=(p_images_train, dataloader_train),
-                                                val_data=(p_images_validation, dataloader_val), epochs=75,
-                                                loss_function=loss_function, lr=0.00001, softmax=softmax, show=True,
-                                                final_lr=0.01)
+    models_and_scores = k_fold_cross_validation(model, k_low=k_low, k_high=k_high, train_data=(p_images_train,
+                                                dataloader_train), val_data=(p_images_validation, dataloader_val),
+                                                epochs=epochs, loss_function=loss_function, lr=lr, softmax=softmax,
+                                                show=True, final_lr=final_lr, device=device)
     p_images_test = ProstateImages(modality=modality, train=False, device=device)
     dataloader_test = DataLoader(p_images_test, batch_size=batch_size_test, shuffle=False)
 
@@ -115,7 +122,7 @@ if __name__ == "__main__":
     # model.cuda(cuda_destination)
     model = models_and_scores[0][0]
 
-    model_dir = "/home/andrewg/PycharmProjects/assignments/predictions/models"
+    model_dir = "/home/andrewg/PycharmProjects/assignments/predictions/models/{}/{}".format(modality, model_type)
     predictions_dir = "/home/andrewg/PycharmProjects/assignments/predictions/prediction_files"
     sort_key = lambda file_name: int(file_name.split('.')[0])
     model_files = [f for f in os.listdir(model_dir) if f[0] in '123456789']

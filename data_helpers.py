@@ -445,7 +445,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     """
 
     if softmax:
-        initialize_CNN2(model)
+        initialize_CNN2(model, "bval")
     errors = []
     eval_errors = []
     f1_train = []
@@ -561,7 +561,7 @@ def train_model(train_data, val_data, model, epochs, optimizer, loss_function, s
     return best_model, conf_matrix, auc_train_of_best_model, f1_train_of_best_model, best_auc, best_f1
 
 
-def k_fold_cross_validation(network, k_low, k_high, train_data, val_data, epochs, loss_function, lr=0.005,
+def k_fold_cross_validation(network, k_low, k_high, train_data, val_data, epochs, loss_function, device, lr=0.005,
                             final_lr=0.05, momentum=0.9, weight_decay=0.04, softmax=False,
                             show=True, cuda_destination=1):
     """
@@ -587,14 +587,19 @@ def k_fold_cross_validation(network, k_low, k_high, train_data, val_data, epochs
     val_data, val_dataloader = val_data
     auc_train_avg, f1_train_avg, auc_eval_avg, f1_eval_avg = [], [], [], []
     models = []
+    model = network(cuda_destination)
+    model.cuda(model.cuda_destination)
+    model.load_state_dict(torch.load(
+        "/home/andrewg/PycharmProjects/assignments/predictions/models/{}/{}/{}.pt".format("bval", "CNN",
+                                                                                          1),
+        map_location=device))
     for k in range(k_low, k_high):
         print("Fold {}".format(k + 1))
-        model = network(cuda_destination)
-        model.cuda(model.cuda_destination)
+        # model = network(cuda_destination)
+        # model.cuda(model.cuda_destination)
         # optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
         # optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
         optimizer = adabound.AdaBound(model.parameters(), lr=lr, final_lr=final_lr, weight_decay=weight_decay)
-        he_initialize(model)
         train_data.change_map_num(k)
         val_data.change_map_num(k)
         model, _, auc_train, f1_train, auc_eval, f1_eval = train_model(train_dataloader, val_dataloader, model, epochs,
@@ -626,6 +631,15 @@ def k_fold_cross_validation(network, k_low, k_high, train_data, val_data, epochs
     return list(zip(models, scores))
 
 
+def generate_random_resampled_number():
+    """
+    This function generates a random file number (in string form) from the resampled directory
+    :return: A number in the form ABCD
+    """
+    file_number = str(random.randint(0, 345))
+    return "".join(["0" for _ in range(4 - len(file_number))]) + file_number
+
+
 def create_kgh_patient_crops(num_crops, crop_dim):
     """
     This function produces a dictionary of cropped images from the KGH data
@@ -639,6 +653,7 @@ def create_kgh_patient_crops(num_crops, crop_dim):
     adc = dict()
     t2 = dict()
     degrees = [i for i in range(26)]
+    matching_filter = sitk.HistogramMatchingImageFilter()
     for directory in directories:
         sub_directory = "{}/{}".format(kgh_data_dir, directory)
         if not(os.path.isdir(sub_directory)):
@@ -663,6 +678,20 @@ def create_kgh_patient_crops(num_crops, crop_dim):
                 bval[directory] = [resample_image(sitk.ReadImage(bval_nrrd_file), out_spacing=(2, 2, 3))]
                 adc[directory] = [resample_image(sitk.ReadImage(adc_nrrd_file), out_spacing=(2, 2, 3))]
                 t2[directory] = [resample_image(sitk.ReadImage(t2_nrrd_file), out_spacing=(2, 2, 3))]
+
+                # random_number = generate_random_resampled_number()
+
+                # random_bval = "/home/andrewg/PycharmProjects/assignments/resampled/bval/ProstateX-{}.nrrd".format(
+                #                 random_number)
+                # random_adc = "/home/andrewg/PycharmProjects/assignments/resampled/adc/ProstateX-{}.nrrd".format(
+                #                 random_number)
+                # random_t2 = "/home/andrewg/PycharmProjects/assignments/resampled/t2/ProstateX-{}.nrrd".format(
+                #                 random_number)
+
+                # bval[directory][0] = matching_filter.Execute(bval[directory][0], sitk.ReadImage(random_bval))
+                # adc[directory][0] = matching_filter.Execute(adc[directory][0], sitk.ReadImage(random_adc))
+                # t2[directory][0] = matching_filter.Execute(t2[directory][0], sitk.ReadImage(random_t2))
+
                 for idx, line in enumerate(fid_file):
                     if idx == 3:
                         fiducial = list(map(float, line.split(',')[1:4]))
@@ -698,6 +727,7 @@ def create_kgh_patient_crops(num_crops, crop_dim):
         except:
             print(directory)
     return bval, adc, t2
+
 
 class KGHProstateImages(Dataset):
     def __init__(self, device, modality):
@@ -850,8 +880,8 @@ def nrrd_to_tensor(file):
     return image
 
 
-def initialize_CNN2(cnn2_model):
-    cnn_model = torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/1.pt")
+def initialize_CNN2(cnn2_model, modality):
+    cnn_model = torch.load("/home/andrewg/PycharmProjects/assignments/predictions/models/{}/CNN/1.pt".format(modality))
     layers = ["conv1.weight", "conv1.bias", "conv2.weight", "conv2.bias", "conv3.weight", "conv3.bias", "conv4.weight",
               "conv4.bias", "conv5.weight", "conv5.bias"]
     state_dict = cnn2_model.state_dict()

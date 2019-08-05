@@ -40,16 +40,11 @@ def train_test_split(data, num_crops_per_image, percent_cancer=0.5, percent_non_
     return training_data, testing_data
 
 
-def kgh_experiment(cnn_type, best_model, loss_function, hyperparameters, starting_layer=8, ending_layer=None,
+def kgh_experiment(cnn_type, loss_function, hyperparameters, starting_layer=8, ending_layer=None,
                    optimizer="adabound", re_init=True, post=False):
 
     assert optimizer in ["adabound", "sgd"]
     global global_best_auc
-
-    if isinstance(cnn_type, CNN):
-        model_type = "CNN"
-    else:
-        model_type = "CNN2"
 
     num_layers, lr, final_lr, weight_decay, num_epochs = hyperparameters
 
@@ -106,7 +101,7 @@ if __name__ == "__main__":
     device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
 
     # Prepare the data
-    modalities = ["bval", "adc", "t2"]
+    modalities = ["adc"] #, "bval", "t2"]
 
     for modality in modalities:
         print("Beginning training with modality {}".format(modality))
@@ -114,7 +109,7 @@ if __name__ == "__main__":
         data = KGHProstateImages(device=device, modality=modality)
 
         # training_data, testing_data = train_test_split(data, 20, percent_cancer=0.8, percent_non_cancer=0.8)
-        num_train = int(0.5 * len(data))
+        num_train = int(0.8 * len(data))
         num_val = len(data) - num_train
         training_data, testing_data = torch.utils.data.random_split(data, (num_train, num_val))
         train_loader = DataLoader(training_data, batch_size=5, shuffle=True)
@@ -132,12 +127,13 @@ if __name__ == "__main__":
             loss_function = nn.BCELoss().cuda(cuda_destination)
 
         num_layers = 9
-        num_epochs = 75
+        num_epochs = 200
 
-        possible_lr = (0.000001 + 0.0000005 * i for i in range(3))
+        num_options = 4
+        possible_lr = (0.000001 + 0.0000005 * i for i in range(num_options))
         for lr in possible_lr:
             final_lr = 100 * lr
-            possible_weight_decay = (0.0001 + 0.00005 * i for i in range(3))
+            possible_weight_decay = (0.0001 + 0.00005 * i for i in range(num_options))
             for weight_decay in possible_weight_decay:
                 hyperparameters = [
                     num_layers,
@@ -148,6 +144,6 @@ if __name__ == "__main__":
                 ]
 
                 print("Learning rate: {}, Weight decay: {}".format(lr, weight_decay))
-                kgh_experiment(cnn_type, best_model, loss_function, hyperparameters, starting_layer=8,
-                               ending_layer=9, re_init=False, post=False)
+                kgh_experiment(cnn_type, loss_function, hyperparameters, starting_layer=8,
+                               ending_layer=9, re_init=True, post=False)
 

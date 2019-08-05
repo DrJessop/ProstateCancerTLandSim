@@ -15,9 +15,9 @@ if __name__ == "__main__":
     ngpu = 1
     device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
 
-    model = CNN(cuda_destination=cuda_destination)
+    model = CNN2(cuda_destination=cuda_destination)
     model.load_state_dict(torch.load(
-        "/home/andrewg/PycharmProjects/assignments/predictions/models/bval/CNN/1.pt",
+        "/home/andrewg/PycharmProjects/assignments/predictions/models/bval/CNN2/46.pt",
         map_location=device))
     model.cuda(cuda_destination)
     model.eval()
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     class_vector = target.to(device).float()
 
     predictions = model(original_images).cpu().detach().numpy()
-    # predictions = np.array([prediction[1] for prediction in predictions])
+    predictions = np.array([prediction[1] for prediction in predictions])
     targets = class_vector.cpu().detach().numpy()
 
     fig = plt.figure()

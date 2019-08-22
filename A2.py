@@ -56,7 +56,7 @@ if __name__ == "__main__":
     # Re-sampling all the images
     location = r"/home/andrewg/PycharmProjects/assignments/resampled/t2/{}.nrrd"
     if not(os.listdir(r"/home/andrewg/PycharmProjects/assignments/resampled/t2")):
-        t2[:] = resample_all_images(t2, out_spacing=(0.5, 0.5, 3))
+        t2[:] = resample_all_images(t2, out_spacing=(2, 2, 3))
         for patient_number, image in enumerate(t2):
             # The 7th index is the position in the path which specifies which patient we are on
             sitk.WriteImage(image,
@@ -131,9 +131,9 @@ if __name__ == "__main__":
     with open("/home/andrewg/PycharmProjects/assignments/train_key_mappings2.pkl", 'wb') as output:
         pk.dump(train_key_mappings, output, pk.HIGHEST_PROTOCOL)
 
-    cropped_images_test = image_cropper(findings_test, resampled_images, padding_filter, *desired_patch_dimensions,
-                                        num_crops_per_image=1, train=False)
+    # cropped_images_test = image_cropper(findings_test, resampled_images, padding_filter, *desired_patch_dimensions,
+    #                                     num_crops_per_image=1, train=False)
 
-    write_cropped_images_test(cropped_images_test)
+    # write_cropped_images_test(cropped_images_test)
 
     print("Done")

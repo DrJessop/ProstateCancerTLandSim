@@ -12,6 +12,7 @@ from image_augmentation import rotation3d
 import shutil
 import pandas as pd
 import copy
+from models import CNN2
 
 
 def resample_image(itk_image, out_spacing, is_label=False):
@@ -893,3 +894,30 @@ def initialize_CNN2(cnn2_model, modality):
         idx = idx + 1
         if idx == len(layers):
             return
+
+
+def cam_visualize_one_image(file):
+    seed = 0
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(0)
+
+    cuda_destination = 0
+    ngpu = 1
+    device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
+
+    model = CNN2(cuda_destination=cuda_destination)
+    model.load_state_dict(torch.load(
+        "/home/andrewg/PycharmProjects/assignments/predictions/models/bval/CNN2/46.pt",
+        map_location=device))
+    model.cuda(cuda_destination)
+    model.eval()
+
+    im = sitk.ReadImage(file)
+    im = sitk.GetArrayFromImage(im).astype(np.float64)
+    plt.imshow(im[1], interpolation="bilinear", cmap="gray")
+    plt.axis("off")
+    plt.show()
+    im = torch.from_numpy(im).cuda()
+    cam = model.class_activation_mapping(im.float())
+    CNN2.visualize(im, cam)

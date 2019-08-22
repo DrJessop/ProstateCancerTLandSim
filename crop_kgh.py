@@ -7,7 +7,7 @@ if __name__ == "__main__":
     num_crops = 30
     crop_dim = (32, 32, 3)
     crops = create_kgh_patient_crops(num_crops=num_crops, crop_dim=crop_dim)
-    crops_directory = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh"
+    crops_directory = "/home/andrewg/PycharmProjects/assignments/resampled_cropped/kgh_nohistmatch"
     modalities = ["bval", "adc", "t2"]
     matching_filter = sitk.HistogramMatchingImageFilter()
     for crop_dict, modality in zip(crops, modalities):
@@ -20,5 +20,5 @@ if __name__ == "__main__":
             reference_image = crop_dict[key][1]  # The first image is just the resampled un-cropped image
             sitk.WriteImage(reference_image, "{}/{}.nrrd".format(patient_folder, 0))
             for img_id in range(2, num_crops + 1):
-                crop_dict[key][img_id] = matching_filter.Execute(crop_dict[key][img_id], reference_image)
+                # crop_dict[key][img_id] = matching_filter.Execute(crop_dict[key][img_id], reference_image)
                 sitk.WriteImage(crop_dict[key][img_id], "{}/{}.nrrd".format(patient_folder, img_id - 1))

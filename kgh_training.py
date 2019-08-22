@@ -5,8 +5,6 @@ from models import CNN, CNN2
 from data_helpers import train_model, KGHProstateImages, change_requires_grad, flatten_batch
 from adabound import AdaBound
 import random
-from numpy import inf as INF
-import pushover
 
 
 def train_test_split(data, num_crops_per_image, percent_cancer=0.5, percent_non_cancer=0.5):
@@ -41,11 +39,9 @@ def train_test_split(data, num_crops_per_image, percent_cancer=0.5, percent_non_
 
 
 def kgh_experiment(cnn_type, loss_function, hyperparameters, starting_layer=8, ending_layer=None,
-                   optimizer="adabound", re_init=True, post=False):
+                   optimizer="adabound", re_init=True):
 
     assert optimizer in ["adabound", "sgd"]
-    global global_best_auc
-
     num_layers, lr, final_lr, weight_decay, num_epochs = hyperparameters
 
     for num_layers_to_freeze in range(starting_layer, ending_layer):
@@ -53,8 +49,8 @@ def kgh_experiment(cnn_type, loss_function, hyperparameters, starting_layer=8, e
         model = cnn_type(cuda_destination)
         model.cuda(cuda_destination)
         model.load_state_dict(torch.load(
-            "/home/andrewg/PycharmProjects/assignments/predictions/models/{}/{}/{}.pt" .format("bval", "CNN",
-                                                                                               1),
+            "/home/andrewg/PycharmProjects/assignments/predictions/models/{}/{}/{}.pt" .format("bval", "CNN2",
+                                                                                               46),
             map_location=device))
 
         if re_init:
@@ -70,42 +66,24 @@ def kgh_experiment(cnn_type, loss_function, hyperparameters, starting_layer=8, e
 
         model, conf_matrix, _, _, best_auc, _ = train_model(train_loader, test_loader, model, num_epochs, optimizer,
                                                             loss_function, softmax=softmax, show=True)
-        if post and best_auc > global_best_auc:
-            global_best_auc = best_auc
-            message = "model: {}, cf: {}, auc: {}, hyp: {}".format(cnn_type, conf_matrix, best_auc, hyperparameters)
-            pushover.send_message("anqmrvc4cr1912vgap6rgicny9m5v8", "u4ohv28y88awci6n6fd9cwkgc7amsx", message)
-
-    if isinstance(model, CNN2):
-        num_images = 5
-        images, class_vector = list(zip(*[(testing_data[i]["image"], testing_data[i]["cancer"])
-                                          for i in range(num_images)]))
-        images = torch.stack(images)
-        class_vector = torch.tensor(class_vector)
-        images, class_vector = flatten_batch(images.shape, images, class_vector, cuda_destination=0)
-        for i in range(num_images):
-            activation = model.class_activation_mapping(images[i * 20].unsqueeze(0))
-            CNN2.visualize(images[i * 20], activation)
-            print(activation[1])
-        print([label for idx, label in enumerate(class_vector) if idx % 30 == 0])
 
 
 if __name__ == "__main__":
 
-    # seed = 0
-    # torch.manual_seed(seed)
-    # if torch.cuda.is_available():
-    #     torch.cuda.manual_seed_all(0)
+    seed = 0
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(0)
 
     cuda_destination = 0
     ngpu = 1
     device = torch.device("cuda:{}".format(cuda_destination) if (torch.cuda.is_available() and ngpu > 0) else "cpu")
 
     # Prepare the data
-    modalities = ["adc"] #, "bval", "t2"]
+    modalities = ["adc"]  # ["t2", "adc", "bval"]
 
     for modality in modalities:
         print("Beginning training with modality {}".format(modality))
-        global_best_auc = -INF
         data = KGHProstateImages(device=device, modality=modality)
 
         # training_data, testing_data = train_test_split(data, 20, percent_cancer=0.8, percent_non_cancer=0.8)
@@ -115,7 +93,14 @@ if __name__ == "__main__":
         train_loader = DataLoader(training_data, batch_size=5, shuffle=True)
         test_loader = DataLoader(testing_data, batch_size=5)
 
-        softmax = False
+        num_cancer_here = 0
+        for i in range(len(training_data)):
+            num_cancer_here += training_data[i]["cancer"]
+        print(num_cancer_here, len(training_data), len(training_data) - num_cancer_here)
+        print(len(testing_data))
+        exit()
+
+        softmax = True
 
         if softmax:
             cnn_type = CNN2
@@ -127,13 +112,13 @@ if __name__ == "__main__":
             loss_function = nn.BCELoss().cuda(cuda_destination)
 
         num_layers = 9
-        num_epochs = 200
+        num_epochs = 500
 
-        num_options = 4
-        possible_lr = (0.000001 + 0.0000005 * i for i in range(num_options))
+        num_options = 1
+        possible_lr = (0.000001 + 0.0000005 * i for i in range(num_options, num_options + 1))
         for lr in possible_lr:
             final_lr = 100 * lr
-            possible_weight_decay = (0.0001 + 0.00005 * i for i in range(num_options))
+            possible_weight_decay = (0.0001 + 0.00005 * i for i in range(num_options, num_options + 1))
             for weight_decay in possible_weight_decay:
                 hyperparameters = [
                     num_layers,
@@ -144,6 +129,6 @@ if __name__ == "__main__":
                 ]
 
                 print("Learning rate: {}, Weight decay: {}".format(lr, weight_decay))
-                kgh_experiment(cnn_type, loss_function, hyperparameters, starting_layer=8,
-                               ending_layer=9, re_init=True, post=False)
+                kgh_experiment(cnn_type, loss_function, hyperparameters, starting_layer=7,
+                               ending_layer=8, re_init=False)
 

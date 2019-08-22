@@ -21,13 +21,15 @@ if __name__ == "__main__":
         map_location=device))
     model.cuda(cuda_destination)
     model.eval()
-    data = KGHProstateImages(device, modality="bval")
+    data = KGHProstateImages(device, modality="t2")
 
     original_images = data[0]["image"][0].unsqueeze(0)
+    indices = [data[0]["index"]]
     target = torch.tensor(data[0]["cancer"]).unsqueeze(0)
 
     for idx in range(1, len(data)):
         next_image = data[idx]["image"][0].unsqueeze(0)
+        indices.append(data[idx]["index"])
         original_images = torch.cat((original_images, next_image), 0)
         target = torch.cat((target, torch.tensor(data[idx]["cancer"]).unsqueeze(0)))
 
@@ -38,6 +40,17 @@ if __name__ == "__main__":
     predictions = np.array([prediction[1] for prediction in predictions])
     targets = class_vector.cpu().detach().numpy()
 
+    '''
+    if isinstance(model, CNN2):
+        for idx in range(60, 70):
+            print(indices[idx], class_vector[idx], predictions[idx])
+            chosen_image = original_images[idx]
+            mapping = model.class_activation_mapping(chosen_image)
+            plt.imshow(chosen_image.cpu().numpy()[1], cmap="gray", interpolation="bilinear")
+            plt.axis("off")
+            plt.show()
+            CNN2.visualize(chosen_image, mapping)
+    '''
     fig = plt.figure()
     ax = fig.add_subplot()
     bootstrap_auc(targets, predictions, ax, nsamples=500)

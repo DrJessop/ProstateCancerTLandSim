@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+
 def image_visualize(data, feature_maps):
 
     data = data.squeeze(0).cpu().detach().numpy()
@@ -119,6 +120,7 @@ class CNN2(nn.Module):
         return data
 
     def class_activation_mapping(self, image):
+        image = image.unsqueeze(0)
         parameters = list(self.named_parameters())[-4:]
         bias_vector = parameters[-1][1][:]
         weights = parameters[-2][1][:]
@@ -149,8 +151,9 @@ class CNN2(nn.Module):
         image = image[1].cpu().detach().numpy()
         heatmap = heatmap[0][code].cpu().detach().numpy()
 
-        plt.imshow(image, cmap="gray")
-        plt.imshow(heatmap, cmap="jet", alpha=alpha)
+        plt.imshow(image, cmap="gray", interpolation="bilinear")
+        plt.imshow(heatmap, cmap="jet", alpha=alpha, interpolation="bilinear")
+        plt.axis("off")
         plt.colorbar()
         plt.show()
 
@@ -205,7 +208,7 @@ class MNIST_CNN(nn.Module):
         # plt.show()
         probs = [np.power(np.e, output) for output in outputs]
         argmax = torch.argmax(torch.tensor(probs))
-        print(probs)
+        # print(probs)
         class_activations = nn.Upsample(size=(28, 28), mode="bilinear")(class_activations)
         class_activations = class_activations[torch.argmax(torch.tensor(probs))]
         # Returns a 2 x 32 x 32 tensor and what each class activation map represents
@@ -220,5 +223,4 @@ class MNIST_CNN(nn.Module):
         plt.imshow(heatmap, cmap="jet", alpha=alpha)
         plt.colorbar()
         plt.show()
-
 
